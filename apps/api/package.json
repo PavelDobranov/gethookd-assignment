@@ -10,7 +10,8 @@
     "test:integration": "vitest run --project postgres",
     "start": "node dist/server.js",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
-    "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts"
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
+    "db:seed": "tsx src/db/seed.ts"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

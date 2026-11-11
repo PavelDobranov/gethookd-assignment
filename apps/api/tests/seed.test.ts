@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
@@ -15,6 +17,7 @@ const { db, close } = createDatabase(seedUrl.href);
 beforeAll(async () => {
   try {
     await admin.db.execute(sql`CREATE DATABASE gethookd_seed_test`);
+    await admin.db.execute(sql`CREATE DATABASE gethookd_seed_unmigrated`);
   } finally {
     await admin.close();
   }
@@ -25,6 +28,53 @@ beforeEach(async () => {
   await db.delete(users);
 });
 afterAll(close);
+
+const run = promisify(execFile);
+function runSeed(databaseUrl = seedUrl.href) {
+  return run("npm", ["run", "db:seed"], {
+    env: { ...process.env, DATABASE_URL: databaseUrl },
+    timeout: 8000,
+  });
+}
+
+it("runs the seed command twice, closes connections and preserves the ID/hash", async () => {
+  const first = await runSeed();
+  const [before] = await db.select().from(users);
+  expect(before?.username).toBe("demo");
+  const second = await runSeed();
+  const records = await db.select().from(users);
+  expect(records).toHaveLength(1);
+  expect(records[0].id).toBe(before.id);
+  expect(records[0].passwordHash === before.passwordHash).toBe(true);
+  for (const output of [first, second]) {
+    expect(output.stdout).toContain("Demo user seed completed.");
+    expect(output.stderr).toBe("");
+    expect(output.stdout.includes(before.passwordHash)).toBe(false);
+    expect(output.stdout.includes("demo-password")).toBe(false);
+  }
+}, 20000);
+
+it("exits promptly with a safe actionable error on an unmigrated database", async () => {
+  const emptyUrl = new URL(seedUrl);
+  emptyUrl.pathname = "/gethookd_seed_unmigrated";
+  await expect(runSeed(emptyUrl.href)).rejects.toMatchObject({
+    code: 1,
+    killed: false,
+    stderr: expect.stringContaining(
+      "Database seeding failed. Check database configuration and apply committed migrations first.",
+    ),
+  });
+}, 10000);
+
+it("reports invalid configuration without exposing its value", async () => {
+  await expect(
+    runSeed("invalid-private-connection-value"),
+  ).rejects.toMatchObject({
+    code: 1,
+    killed: false,
+    stderr: expect.not.stringContaining("invalid-private-connection-value"),
+  });
+}, 10000);
 
 it("seeds an empty migrated database with a salted demo password hash", async () => {
   await seedDemoUser(db);

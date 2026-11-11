@@ -124,10 +124,11 @@ container is required before running the suite.
 ```sh
 npm run db:generate -w @gethookd/api  # Generate SQL/metadata for review and commit
 npm run db:migrate -w @gethookd/api   # Apply committed migrations to configured DB
+npm run db:seed -w @gethookd/api      # Insert the demo user only if absent
 npm run test -w @gethookd/api -- tests/db.test.ts  # Isolated migration/read/write tests
 ```
 
-The workspace scripts invoke the installed Drizzle Kit with
+The migration workspace scripts invoke the installed Drizzle Kit with
 `--config=drizzle.config.ts` from `apps/api`; no tool download is needed.
 Start the local database first (`npm run dev:db`) before applying migrations.
 Commands use root `.env` / exported configuration as described above. Migration
@@ -140,7 +141,7 @@ non-null usernames and non-null password hashes. `createDatabase(databaseUrl)`
 in `src/db/client.ts` returns a Drizzle `db` and async `close()`; callers own the
 pool and must close it on shutdown or test teardown. Importing the module does
 not connect, migrate or seed. Drizzle query builders / SQL template parameters
-keep values separate from SQL. There are no seeded users yet.
+keep values separate from SQL.
 
 The database integration suite applies the real workspace-local migration CLI
 against an initially empty disposable PostgreSQL database, checks read/write
@@ -153,17 +154,43 @@ advisory concerns esbuild's development server, which these generate/migrate
 commands do not launch. Do not expose such a server; no forced downgrade or
 unreviewed dependency override is applied.
 
+### Demo user seeding
+
+After migrations, run `npm run db:seed -w @gethookd/api`. Public local credentials
+are username **`demo`**, password **`demo-password`**; only a randomly salted
+scrypt hash is stored. There is no login endpoint yet. The explicit command uses
+the same configuration loader, closes its pool on success or failure, and exits
+nonzero with a safe diagnostic if configuration or database access fails. It does
+not generate or apply migrations. No passwords, hashes or connection URLs are
+printed.
+
+`src/db/seed.ts` exports reusable `seedDemoUser(db)` for the forthcoming setup
+initializer; imported callers retain ownership of their database connection.
+Database uniqueness and insert-on-conflict handling leave an existing demo ID and
+exact hash untouched. Repeated seeding (and setup once introduced) never resets
+a deliberately changed password or changes unrelated users. The documented demo
+password therefore stops working if someone deliberately changes it.
+
+```sh
+npm run test -w @gethookd/api -- tests/seed.test.ts
+```
+
+Tests use a separate database inside the disposable PostgreSQL project, covering
+empty/repeated seeding, changed credentials, unrelated records and two real CLI
+runs with ID/hash preservation. Unmigrated-database and invalid-configuration
+checks require prompt nonzero exits without exposing sensitive details.
+
 ## Password hashing primitive
 
 `apps/api/src/auth/password.ts` provides async `hashPassword` / `verifyPassword`
-for future seed/login consumers (not yet wired to accounts). Native Node scrypt
+for seed and future login consumers. Native Node scrypt
 uses a fresh 16-byte salt, a 64-byte key, and the OWASP baseline `N=131072, r=8,
 p=1` (~128 MiB per derivation; 256 MiB memory ceiling). The stored format is
 `scrypt$N$r$p$saltHex$keyHex`; verification accepts only this bounded cost profile
 and uses a timing-safe key comparison. Malformed hashes and wrong passwords
 return false. Passwords must contain 1–1024 JavaScript string characters and are
 not trimmed or normalized. Neither passwords nor hashes are logged or returned
-by HTTP routes. Hashing does not yet create an authentication flow.
+by HTTP routes. Seeding does not yet create an authentication flow.
 
 ## Web component tests
 
