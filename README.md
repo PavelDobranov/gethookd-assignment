@@ -28,5 +28,14 @@ curl -i http://localhost:3000/api/health
 loopback listener on an ephemeral port per test and close it after each test.
 Tests live outside `src/` and are not included in the production build.
 
+## Web component tests
+
+```sh
+npm run test -w @gethookd/web   # Vitest + jsdom + React Testing Library
+```
+
+Component tests render the real app and explicitly clean up the DOM after each
+test to prevent cross-test leakage. No browser automation is required.
+
 `npm test` runs available workspace suites. `npm run build` builds workspaces;
 `npm run check` runs Biome across `apps/`.
