@@ -1,0 +1,21 @@
+{
+  "name": "gethookd",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:db": "docker compose up -d db",
+    "dev": "npm run dev:db && concurrently --kill-others-on-fail -n api,web \"npm run dev -w @gethookd/api\" \"npm run dev -w @gethookd/web\"",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "biome lint .",
+    "format": "biome format --write apps/",
+    "check": "biome check apps/",
+    "check:fix": "biome check --write apps/"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "concurrently": "^10.0.7"
+  }
+}
