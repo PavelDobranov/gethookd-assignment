@@ -17,7 +17,10 @@ npm run dev
 Open `http://localhost:5173`; the API is at `http://localhost:3000`. Sign in with
 `demo` / `demo-password` to see the server-verified username and Log out.
 Refresh revalidates the session through `/api/auth/me` before displaying it.
-A full built-web Compose stack and URL-specific navigation are not implemented yet.
+`/` enters the auth flow: without a token it resolves to `/login`; a verified
+session resolves to `/portal`. Direct visits, refresh, browser Back and restored
+back-forward-cache pages revalidate before displaying protected content.
+A full built-web Compose stack is not implemented yet.
 
 `setup` starts **only** Compose `db`, waits up to 30 seconds for healthy TCP
 readiness (120-second overall provisioning deadline, including image acquisition),
@@ -335,8 +338,10 @@ keyboard submission, required fields, pending status and generic errors. It clea
 the password field on submission and checks `/me` before saving the returned JWT
 and rendering the username. Restored sessions show a loading state until verified;
 401 removes the token, while network/server failures show an unavailable state
-without automatic retries. Reload explicitly retries restoration; Log out clears
-the token and in-memory identity and returns to login.
+without automatic retries. Retry explicitly revalidates the retained token; Log out
+clears the token and in-memory identity and replaces the route with `/login`.
+Navigation, logout and unmount invalidate pending responses so they cannot restore
+an obsolete session.
 Normal tab closure ends that tab's storage session, but browser session restore or
 duplicated tabs may preserve/copy it. Browser-readable storage is vulnerable to
 XSS; removing a token does not revoke a copy, and cross-tab logout is not guaranteed.
@@ -357,7 +362,8 @@ npm run test -w @gethookd/web   # Vitest + jsdom + React Testing Library
 Component tests render the real app with HTTP-boundary mocks and explicitly clean
 up the DOM after each test. They cover keyboard login/logout, JWT-only persistence,
 server-verified username, pending/error states, restoration, 401, unavailable
-service, blocked storage and late responses after unmount.
+service/manual retry, blocked storage, route transitions, Back/cache restoration
+and late responses after navigation, logout or unmount.
 
 ```sh
 npm run test -w @gethookd/web -- src/app.test.tsx
@@ -370,6 +376,17 @@ out. Screenshots were inspected; no horizontal overflow occurred at widths
 320/768/1024/1440px and no console/runtime errors were observed. No Playwright or
 browser E2E suite is installed; E2E automation remains deferred until the full
 frontend is implemented.
+
+Navigation/recovery runtime checks in an isolated Chromium profile through Vite
+confirmed direct unauthenticated `/portal` → `/login`, login → `/portal`, refresh,
+and logout then browser Back without protected content returning. A fresh tab
+without an opener and a new tab after closing the authenticated tab both required
+login. Blocking the identity request showed unavailable without automatic retries;
+unblocking and clicking Retry recovered. Stopping the local API produced a Vite
+proxy 5xx and the same unavailable state; restarting it and clicking Retry restored
+the verified session. No runtime exceptions were observed; the portal screenshot
+contained only the username and logout control. Browser restore/duplicated-tab
+storage caveats above still apply; these checks do not imply token revocation.
 
 `npm test` explicitly requires API unit, PostgreSQL integration, and web suites,
 stopping with a nonzero exit for a missing workspace/test script, zero collected

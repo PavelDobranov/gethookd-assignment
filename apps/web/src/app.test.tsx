@@ -187,6 +187,130 @@ it("keeps the login available with a useful error if storage is blocked", async 
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
+it.each(["/", "/login", "/portal"])(
+  "routes unauthenticated %s visits to login",
+  (path) => {
+    history.replaceState(null, "", path);
+    render(<App />);
+    expect(location.pathname).toBe("/login");
+    expect(screen.getByLabelText("Username")).toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it("hides the previous identity and revalidates on Back, clearing a 401", async () => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  fetchMock.mockResolvedValueOnce(Response.json({ user }));
+  render(<App />);
+  await screen.findByText(user.username);
+  let resolve: (value: Response) => void = () => {};
+  fetchMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  act(() => {
+    history.replaceState(null, "", "/portal");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(screen.queryByText(user.username)).toBeNull();
+  expect(screen.getByRole("status").textContent).toMatch(/checking/i);
+  await act(async () => {
+    resolve(Response.json({}, { status: 401 }));
+  });
+  expect(location.pathname).toBe("/login");
+  expect(sessionStorage.length).toBe(0);
+  act(() => {
+    history.replaceState(null, "", "/portal");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  expect(screen.queryByText(user.username)).toBeNull();
+  expect(location.pathname).toBe("/login");
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it.each(["network", "server"])(
+  "recovers from %s only on manual retry",
+  async (kind) => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+    if (kind === "network")
+      fetchMock.mockRejectedValueOnce(new TypeError("offline"));
+    else fetchMock.mockResolvedValueOnce(Response.json({}, { status: 503 }));
+    render(<App />);
+    await screen.findByRole("alert");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockResolvedValueOnce(Response.json({ user }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText(user.username)).toBeDefined();
+    expect(location.pathname).toBe("/portal");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  },
+);
+
+it("does not restore a late identity after navigation and logout", async () => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  let resolve: (value: Response) => void = () => {};
+  fetchMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  render(<App />);
+  fetchMock.mockResolvedValueOnce(Response.json({}, { status: 503 }));
+  act(() => {
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await screen.findByRole("alert");
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "Log out" }));
+  await act(async () => {
+    resolve(Response.json({ user }));
+  });
+  expect(screen.queryByText(user.username)).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+  expect(location.pathname).toBe("/login");
+});
+
+it("ignores a login response superseded by navigation", async () => {
+  let resolve: (value: Response) => void = () => {};
+  fetchMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  render(<App />);
+  await submitLogin();
+  act(() => {
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await act(async () => {
+    resolve(Response.json({ token, user }));
+  });
+  expect(screen.queryByText(user.username)).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("revalidates a back-forward cache restoration", async () => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  fetchMock.mockResolvedValueOnce(Response.json({ user }));
+  render(<App />);
+  await screen.findByText(user.username);
+  fetchMock.mockResolvedValueOnce(Response.json({}, { status: 401 }));
+  act(() => {
+    window.dispatchEvent(
+      new PageTransitionEvent("pageshow", { persisted: true }),
+    );
+  });
+  expect(screen.queryByText(user.username)).toBeNull();
+  await screen.findByLabelText("Username");
+  expect(sessionStorage.length).toBe(0);
+  expect(location.pathname).toBe("/login");
+});
+
 it("ignores a restored identity response after unmount", async () => {
   sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
   let resolve: (value: Response) => void = () => {};
