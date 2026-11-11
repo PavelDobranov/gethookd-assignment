@@ -2,15 +2,23 @@ services:
   db:
     image: postgres:17
     environment:
-      POSTGRES_USER: gethookd
-      POSTGRES_PASSWORD: gethookd
-      POSTGRES_DB: gethookd
+      POSTGRES_USER: ${POSTGRES_USER-gethookd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD-gethookd}
+      POSTGRES_DB: ${POSTGRES_DB-gethookd}
+    # Preserve unset defaults, but reject explicitly empty initialization values.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        : "$${POSTGRES_USER:?POSTGRES_USER must not be empty}"
+        : "$${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must not be empty}"
+        : "$${POSTGRES_DB:?POSTGRES_DB must not be empty}"
+        exec /usr/local/bin/docker-entrypoint.sh postgres
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gethookd -d gethookd"]
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 5s
       retries: 5
