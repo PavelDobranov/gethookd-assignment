@@ -18,6 +18,7 @@ beforeAll(async () => {
   try {
     await admin.db.execute(sql`CREATE DATABASE gethookd_seed_test`);
     await admin.db.execute(sql`CREATE DATABASE gethookd_seed_unmigrated`);
+    await admin.db.execute(sql`CREATE DATABASE gethookd_initialize_test`);
   } finally {
     await admin.close();
   }
@@ -28,6 +29,49 @@ beforeEach(async () => {
   await db.delete(users);
 });
 afterAll(close);
+
+it("initializes an empty database then preserves changed credentials and unrelated data on replay", async () => {
+  const url = new URL(seedUrl);
+  url.pathname = "/gethookd_initialize_test";
+  const connection = createDatabase(url.href);
+  const initialize = () =>
+    run("npm", ["run", "db:initialize"], {
+      env: { ...process.env, DATABASE_URL: url.href },
+      timeout: 8000,
+    });
+  try {
+    await initialize();
+    const [demo] = await connection.db.select().from(users);
+    expect(demo.username).toBe("demo");
+    expect(await verifyPassword("demo-password", demo.passwordHash)).toBe(true);
+    await connection.db
+      .update(users)
+      .set({ passwordHash: await hashPassword("changed-password") })
+      .where(eq(users.id, demo.id));
+    await connection.db
+      .insert(users)
+      .values({ username: "unrelated", passwordHash: "test-hash" });
+    const before = await connection.db
+      .select()
+      .from(users)
+      .orderBy(users.username);
+    await initialize();
+    const after = await connection.db
+      .select()
+      .from(users)
+      .orderBy(users.username);
+    expect(JSON.stringify(after) === JSON.stringify(before)).toBe(true);
+    expect(
+      (
+        await connection.db.execute(
+          sql`SELECT * FROM drizzle.__drizzle_migrations`,
+        )
+      ).rows,
+    ).toHaveLength(1);
+  } finally {
+    await connection.close();
+  }
+}, 20000);
 
 const run = promisify(execFile);
 function runSeed(databaseUrl = seedUrl.href) {
