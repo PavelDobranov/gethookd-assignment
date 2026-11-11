@@ -79,6 +79,26 @@ it.each([
   expect(log.mock.calls).toEqual([["Authentication database unavailable."]]);
 });
 
+it.each([
+  ["client query_timeout", new Error("Query read timeout")],
+  [
+    "server statement_timeout",
+    Object.assign(new Error("private-query"), { code: "57014" }),
+  ],
+])("returns a safe 503 for %s", async (_path, cause) => {
+  failure = queryFailure(cause);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await request();
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({
+    error: {
+      code: "SERVICE_UNAVAILABLE",
+      message: "Authentication service unavailable.",
+    },
+  });
+  expect(log.mock.calls).toEqual([["Authentication database unavailable."]]);
+});
+
 it("recognizes a code-less aggregate driver failure with explicit network errors", async () => {
   failure = queryFailure(
     new AggregateError([
@@ -92,7 +112,11 @@ it("recognizes a code-less aggregate driver failure with explicit network errors
 it.each([
   new Error("private-password private-token"),
   queryFailure(new Error("Connection terminated unexpectedly")),
-  queryFailure(new Error("Query read timeout")),
+  new Error("Query read timeout"),
+  queryFailure(new Error("private-sql Query read timeout")),
+  queryFailure(
+    Object.assign(new Error("Query read timeout"), { code: "42P01" }),
+  ),
   queryFailure(Object.assign(new Error("private-sql"), { code: "42P01" })),
   queryFailure(Object.assign(new Error("private-sql"), { code: "23505" })),
   queryFailure(Object.assign(new Error("private-sql"), { code: "57P09" })),

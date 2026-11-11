@@ -1,8 +1,11 @@
 import { DrizzleQueryError } from "drizzle-orm";
 import type { ErrorRequestHandler } from "express";
 
-function hasUnavailableCode(error: unknown): boolean {
-  if (!(error instanceof Error) || !("code" in error)) return false;
+function isUnavailableCause(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  // pg's client-side query_timeout emits this exact error without a code.
+  // It can win the race with PostgreSQL's statement_timeout (57014).
+  if (!("code" in error)) return error.message === "Query read timeout";
 
   const { code } = error;
   return (
@@ -34,8 +37,8 @@ function databaseUnavailable(error: unknown): boolean {
   const { cause } = error;
   // Node may aggregate failed connection attempts to multiple addresses.
   return (
-    hasUnavailableCode(cause) ||
-    (cause instanceof AggregateError && cause.errors.some(hasUnavailableCode))
+    isUnavailableCause(cause) ||
+    (cause instanceof AggregateError && cause.errors.some(isUnavailableCause))
   );
 }
 
