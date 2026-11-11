@@ -86,6 +86,18 @@ Production requires a private signing secret, non-demo credentials, HTTPS, and a
 authentication hardening review. No server settings use the `VITE_` prefix or are
 imported by the web app.
 
+## Password hashing primitive
+
+`apps/api/src/auth/password.ts` provides async `hashPassword` / `verifyPassword`
+for future seed/login consumers (not yet wired to accounts). Native Node scrypt
+uses a fresh 16-byte salt, a 64-byte key, and the OWASP baseline `N=131072, r=8,
+p=1` (~128 MiB per derivation; 256 MiB memory ceiling). The stored format is
+`scrypt$N$r$p$saltHex$keyHex`; verification accepts only this bounded cost profile
+and uses a timing-safe key comparison. Malformed hashes and wrong passwords
+return false. Passwords must contain 1–1024 JavaScript string characters and are
+not trimmed or normalized. Neither passwords nor hashes are logged or returned
+by HTTP routes. Hashing does not yet create an authentication flow.
+
 ## Web component tests
 
 ```sh
