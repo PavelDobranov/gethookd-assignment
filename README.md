@@ -5,11 +5,15 @@ An ad-intelligence platform
 ## API development and verification
 
 Use Node.js from `.nvmrc` and install workspace dependencies with `npm ci`
-from the repository root.
+from the repository root. Full tests require a running Docker Engine and Docker
+Compose with `up --wait` support, plus access to the `postgres:17` image (pulled
+on first use).
 
 ```sh
 npm run dev -w @gethookd/api    # API only, with reload on source changes
-npm run test -w @gethookd/api   # Vitest HTTP tests; empty/failing suites fail
+npm run test -w @gethookd/api   # Required unit + disposable PostgreSQL suites
+npm run test:unit -w @gethookd/api  # HTTP/config/password tests, no Docker
+npm run test:integration -w @gethookd/api  # Real PostgreSQL 17; Docker required
 npm run build -w @gethookd/api
 npm run start -w @gethookd/api  # run the compiled API after building
 ```
@@ -86,6 +90,36 @@ Production requires a private signing secret, non-demo credentials, HTTPS, and a
 authentication hardening review. No server settings use the `VITE_` prefix or are
 imported by the web app.
 
+## Disposable PostgreSQL integration tests
+
+`npm test` requires API unit tests, a separate PostgreSQL integration run, and web
+component tests. Each command must collect tests and succeed; missing Docker,
+failed provisioning, readiness timeout, and empty/failing suites are errors, never
+skips. Use `npm run test:unit -w @gethookd/api -- tests/password.test.ts` to focus
+a unit file without provisioning PostgreSQL.
+
+Integration global setup uses **only `compose.test.yaml`**, a random
+`gethookd-test-<UUID>` Compose project, an isolated labeled volume/network, and a
+dynamic loopback port. It never reads `DATABASE_URL` or uses the developer Compose
+stack. The disposable database/user is `gethookd_test`; the test performs a real
+SQL query and verifies PostgreSQL 17 and that database identity. Project names
+are printed for inspection; connection credentials are public test-only values.
+
+Docker commands have deadlines: provisioning is capped at 120 seconds (including
+image acquisition) and health readiness at 30 seconds; SQL connections/queries
+are limited to two seconds. The TCP healthcheck avoids mistaking PostgreSQL's
+temporary initialization server for final readiness. Test pools close after the
+suite. Global teardown runs on test failure as well as success; failed setup also
+attempts cleanup. Before deleting resources, cleanup inspects project and run-ID
+labels, then removes only that generated project's containers, network and volume.
+It never prunes or runs `down` against the developer project.
+
+If Docker becomes unavailable during cleanup or the process is force-killed,
+resources can remain: restore Docker, inspect the printed project/run-ID labels,
+and remove **only that verified disposable project** with its test Compose file.
+Never delete a developer volume to repair test startup. No background database
+container is required before running the suite.
+
 ## Password hashing primitive
 
 `apps/api/src/auth/password.ts` provides async `hashPassword` / `verifyPassword`
@@ -107,7 +141,8 @@ npm run test -w @gethookd/web   # Vitest + jsdom + React Testing Library
 Component tests render the real app and explicitly clean up the DOM after each
 test to prevent cross-test leakage. No browser automation is required.
 
-`npm test` explicitly requires both API and web suites, stopping with a nonzero
-exit for a missing workspace/test script, zero collected tests, or a failing test.
+`npm test` explicitly requires API unit, PostgreSQL integration, and web suites,
+stopping with a nonzero exit for a missing workspace/test script, zero collected
+tests, a failed prerequisite, or a failing test.
 `npm run build` builds and type-checks both workspaces; `npm run lint` runs Biome
 lint, and `npm run check` runs Biome checks across `apps/`.
