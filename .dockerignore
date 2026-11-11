@@ -1,0 +1,10 @@
+**
+!package.json
+!package-lock.json
+!apps/
+!apps/**
+**/node_modules
+**/dist
+**/.env*
+**/*.pem
+**/*.key
