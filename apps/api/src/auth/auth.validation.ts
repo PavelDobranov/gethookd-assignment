@@ -1,28 +1,30 @@
-export type Credentials = { username: string; password: string };
+export type Credentials = {
+  username: string;
+  password: string;
+};
 
-export function parseCredentials(body: unknown): Credentials | null {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+export function parseCredentials(value: unknown): Credentials | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const { username, password } = value as Record<string, unknown>;
+
   if (
-    !("username" in body) ||
-    typeof body.username !== "string" ||
-    body.username.length === 0 ||
-    body.username.length > 100 ||
-    !("password" in body) ||
-    typeof body.password !== "string" ||
-    body.password.length === 0 ||
-    body.password.length > 1024
+    typeof username !== "string" ||
+    username.length < 1 ||
+    username.length > 100
   ) {
     return null;
   }
-  return { username: body.username, password: body.password };
-}
 
-export function parseBearerToken(
-  authorization: string | undefined,
-): string | null {
-  const match =
-    /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i.exec(
-      authorization ?? "",
-    );
-  return match?.[1] ?? null;
+  if (
+    typeof password !== "string" ||
+    password.length < 1 ||
+    password.length > 1024
+  ) {
+    return null;
+  }
+
+  return { username, password };
 }

@@ -1,13 +1,18 @@
 import { json, Router } from "express";
+import type { createDatabase } from "../db/client.js";
 import { handleAuthError } from "./auth.errors.js";
-import { type AuthOptions, createAuthService } from "./auth.service.js";
-import { parseBearerToken, parseCredentials } from "./auth.validation.js";
+import { createAuthService } from "./auth.service.js";
+import { parseCredentials } from "./auth.validation.js";
 
-export type { AuthOptions } from "./auth.service.js";
+export type AuthOptions = {
+  db: ReturnType<typeof createDatabase>["db"];
+  jwtSecret: string;
+};
 
-export function createAuthRouter(options: AuthOptions) {
-  const auth = createAuthService(options);
+export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
   const router = Router();
+  const auth = createAuthService(db, jwtSecret);
+
   router.use((_req, res, next) => {
     res.set("Cache-Control", "no-store");
     next();
@@ -17,6 +22,7 @@ export function createAuthRouter(options: AuthOptions) {
 
   router.post("/login", async (req, res) => {
     const credentials = parseCredentials(req.body);
+
     if (!credentials) {
       res.status(422).json({
         error: {
@@ -28,6 +34,7 @@ export function createAuthRouter(options: AuthOptions) {
       return;
     }
     const session = await auth.login(credentials);
+
     if (!session) {
       res.status(401).json({
         error: {
@@ -41,8 +48,9 @@ export function createAuthRouter(options: AuthOptions) {
   });
 
   router.get("/me", async (req, res) => {
-    const token = parseBearerToken(req.get("authorization"));
-    const user = await auth.getUser(token);
+    const token = /^Bearer (\S+)$/i.exec(req.get("authorization") ?? "")?.[1];
+    const user = token ? await auth.getUser(token) : null;
+
     if (!user) {
       res.status(401).json({
         error: { code: "UNAUTHENTICATED", message: "Authentication required." },

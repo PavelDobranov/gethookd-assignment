@@ -5,12 +5,9 @@ import type { Credentials } from "./auth.validation.js";
 import { signToken, verifySubject } from "./jwt.js";
 import { verifyPassword } from "./password.js";
 
-export type AuthOptions = {
-  db: ReturnType<typeof createDatabase>["db"];
-  jwtSecret: string;
-};
+type Database = ReturnType<typeof createDatabase>["db"];
 
-export function createAuthService({ db, jwtSecret }: AuthOptions) {
+export function createAuthService(db: Database, jwtSecret: string) {
   return {
     async login({ username, password }: Credentials) {
       const [user] = await db
@@ -21,22 +18,30 @@ export function createAuthService({ db, jwtSecret }: AuthOptions) {
       if (!user || !(await verifyPassword(password, user.passwordHash))) {
         return null;
       }
-      const token = await signToken(String(user.id), jwtSecret);
-      return { token, user: { id: String(user.id), username: user.username } };
+      return {
+        token: await signToken(String(user.id), jwtSecret),
+        user: {
+          id: String(user.id),
+          username: user.username,
+        },
+      };
     },
 
-    async getUser(token: string | null) {
-      if (!token) return null;
+    async getUser(token: string) {
       const subject = await verifySubject(token, jwtSecret);
-      if (!subject) return null;
+      if (!subject) {
+        return null;
+      }
 
       const [user] = await db
-        .select({ id: users.id, username: users.username })
+        .select({
+          id: users.id,
+          username: users.username,
+        })
         .from(users)
         .where(eq(users.id, subject))
         .limit(1);
-      if (!user) return null;
-      return { id: String(user.id), username: user.username };
+      return user ? { id: String(user.id), username: user.username } : null;
     },
   };
 }
