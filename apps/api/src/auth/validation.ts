@@ -1,7 +1,4 @@
-export type Credentials = {
-  username: string;
-  password: string;
-};
+import type { Credentials } from "./service.js";
 
 export function parseCredentials(value: unknown): Credentials | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

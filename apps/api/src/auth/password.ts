@@ -29,6 +29,7 @@ export async function hashPassword(password: string): Promise<string> {
       "Password must be a nonempty string of at most 1024 characters",
     );
   }
+
   const salt = randomBytes(saltBytes);
   const key = await deriveKey(password, salt);
   return `${format}$${salt.toString("hex")}$${key.toString("hex")}`;
@@ -45,11 +46,14 @@ export async function verifyPassword(
   ) {
     return false;
   }
-  const parts = storedHash.split("$");
-  if (parts.length !== 6 || parts.slice(0, 4).join("$") !== format)
-    return false;
-  const [, , , , salt, key] = parts;
+
   // Accept only this version's cost profile; never run attacker-selected costs.
+  const parts = storedHash.split("$");
+  if (parts.length !== 6 || parts.slice(0, 4).join("$") !== format) {
+    return false;
+  }
+
+  const [, , , , salt, key] = parts;
   if (
     salt.length !== saltBytes * 2 ||
     key.length !== keyBytes * 2 ||
@@ -58,10 +62,7 @@ export async function verifyPassword(
   ) {
     return false;
   }
-  try {
-    const derived = await deriveKey(password, Buffer.from(salt, "hex"));
-    return timingSafeEqual(derived, Buffer.from(key, "hex"));
-  } catch {
-    return false;
-  }
+
+  const derived = await deriveKey(password, Buffer.from(salt, "hex"));
+  return timingSafeEqual(derived, Buffer.from(key, "hex"));
 }

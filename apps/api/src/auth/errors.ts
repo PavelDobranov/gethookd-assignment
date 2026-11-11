@@ -1,27 +1,41 @@
 import { DrizzleQueryError } from "drizzle-orm";
 import type { ErrorRequestHandler } from "express";
 
-function databaseUnavailable(error: unknown): boolean {
-  if (!(error instanceof DrizzleQueryError) || !error.cause) return false;
+function hasUnavailableCode(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error)) return false;
 
-  const cause: NodeJS.ErrnoException = error.cause;
-  const { code } = cause;
-  // pg's connection termination and client timeout errors have no code.
+  const { code } = error;
   return (
-    code === undefined ||
-    code.startsWith("08") ||
-    code.startsWith("53") ||
-    code.startsWith("57P0") ||
-    [
-      "57014",
-      "ECONNREFUSED",
-      "ECONNRESET",
-      "ETIMEDOUT",
-      "EHOSTUNREACH",
-      "ENETUNREACH",
-      "ENOTFOUND",
-      "EAI_AGAIN",
-    ].includes(code)
+    typeof code === "string" &&
+    (code.startsWith("08") ||
+      code.startsWith("53") ||
+      [
+        "57P01",
+        "57P02",
+        "57P03",
+        "57P04",
+        "57P05",
+        "57014",
+        "ECONNREFUSED",
+        "ECONNRESET",
+        "ETIMEDOUT",
+        "EPIPE",
+        "EHOSTUNREACH",
+        "ENETUNREACH",
+        "ENOTFOUND",
+        "EAI_AGAIN",
+      ].includes(code))
+  );
+}
+
+function databaseUnavailable(error: unknown): boolean {
+  if (!(error instanceof DrizzleQueryError)) return false;
+
+  const { cause } = error;
+  // Node may aggregate failed connection attempts to multiple addresses.
+  return (
+    hasUnavailableCode(cause) ||
+    (cause instanceof AggregateError && cause.errors.some(hasUnavailableCode))
   );
 }
 
@@ -48,7 +62,9 @@ export const handleAuthError: ErrorRequestHandler = (
     });
     return;
   }
+
   if (databaseUnavailable(error)) {
+    console.error("Authentication database unavailable.");
     res.status(503).json({
       error: {
         code: "SERVICE_UNAVAILABLE",
@@ -57,6 +73,8 @@ export const handleAuthError: ErrorRequestHandler = (
     });
     return;
   }
+
+  console.error("Unexpected authentication failure.");
   res.status(500).json({
     error: { code: "INTERNAL_ERROR", message: "Internal server error." },
   });

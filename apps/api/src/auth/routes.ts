@@ -1,8 +1,8 @@
 import { json, Router } from "express";
 import type { createDatabase } from "../db/client.js";
-import { handleAuthError } from "./auth.errors.js";
-import { createAuthService } from "./auth.service.js";
-import { parseCredentials } from "./auth.validation.js";
+import { handleAuthError } from "./errors.js";
+import { createAuthService } from "./service.js";
+import { parseCredentials } from "./validation.js";
 
 export type AuthOptions = {
   db: ReturnType<typeof createDatabase>["db"];
@@ -17,6 +17,7 @@ export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
     res.set("Cache-Control", "no-store");
     next();
   });
+
   // Parse primitive JSON too so valid JSON with invalid field shape is a 422.
   router.use(json({ limit: "16kb", strict: false, inflate: false }));
 
@@ -33,6 +34,7 @@ export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
       });
       return;
     }
+
     const session = await auth.login(credentials);
 
     if (!session) {
@@ -44,6 +46,7 @@ export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
       });
       return;
     }
+
     res.json(session);
   });
 
@@ -57,9 +60,11 @@ export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
       });
       return;
     }
+
     res.json({ user });
   });
 
   router.use(handleAuthError);
+
   return router;
 }
