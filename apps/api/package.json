@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "test": "vitest run tests/",
     "start": "node dist/server.js"
   },
   "devDependencies": {
@@ -12,5 +13,8 @@
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "express": "^5.3.0"
   }
 }
