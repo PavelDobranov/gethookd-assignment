@@ -174,36 +174,4 @@ We use AI tools every day and expect you to. We want to see how you direct them,
 
 - how you checked that AI-written tests would fail if the feature broke. 
 
-- **COULD** One raw session export or log showing a non-trivial exchange. 
-
-## **What to submit** 
-
-A private repository shared with us, with small unsquashed commits. 
-
-- `README.md` : the one command to run everything; how to start the ingest script; how to run the tests; how 
-
-- to connect an MCP client; what is unfinished and what you would do next. 
-
-- `DESIGN.md` , `MCP_EVAL.md` , `AI_NOTES.md` and your agent instruction files. 
-
-## **How we assess** 
-
-|**Area**|**Weight**|**What we look for**|
-|---|---|---|
-|Correctness and|30%|v1 behaves as specified; v0 is untouched; pagination holds up while ingest|
-|contracts||runs;<br>`days_active`and the impressions sort are right.|
-|Agent experience|25%|Tool descriptions, response size, errors a model can act on, and an<br>evaluation that honestly shows what changed.|
-|Tests that catch<br>regressions|15%|We will break a few things on purpose and see whether your tests notice.|
-|Security and metering|15%|Key handling, scopes, revocation, exact counting under concurrency and<br>retries.|
-|Judgment and<br>communication|15%|What you chose to cut, your design notes, your AI notes and commit history.|
-
-
-
-We run every submission from a clean clone. If the one command does not work, we will ask you to fix it before we review anything else. 
-
-## **What happens next** 
-
-If your submission moves forward, we schedule a 60-minute call. You walk us through it for 15 minutes; then, with your own AI tools and screen shared, you extend your code with a small change of the kind we make every week. Be ready to explain any line in your repository. 
-
-Use synthetic data only; do not scrape any real ad library. Model usage for the evaluation should cost a few dollars at most. If something in this document is ambiguous, make a reasonable assumption, write it in your README, and keep going. That counts in your favour. 
-
+- **COULD** One raw session export or log showing a non-trivial exchange.
