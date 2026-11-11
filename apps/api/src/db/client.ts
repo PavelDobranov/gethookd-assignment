@@ -9,6 +9,11 @@ export function createDatabase(databaseUrl: string) {
     connectionString: databaseUrl,
     connectionTimeoutMillis: 2000,
   });
+  // Idle clients can fail outside a query; pg removes them before reconnecting.
+  // https://node-postgres.com/apis/pool#error
+  pool.on("error", () => {
+    console.error("Database idle connection lost.");
+  });
   const db = drizzle({ client: pool, schema });
   return { db, close: () => pool.end() };
 }

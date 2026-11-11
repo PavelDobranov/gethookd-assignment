@@ -1,13 +1,21 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { createDatabase } from "../src/db/client.js";
+
+// Health and unknown routes must not need a reachable database.
+const database = createDatabase("postgresql://test:test@127.0.0.1:1/test");
+afterAll(database.close);
 
 let server: Server | undefined;
 let baseUrl: string;
 
 beforeEach(async () => {
-  server = createApp().listen(0, "127.0.0.1");
+  server = createApp({
+    db: database.db,
+    jwtSecret: "app-test-only-signing-secret-at-least-32-bytes",
+  }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") {
