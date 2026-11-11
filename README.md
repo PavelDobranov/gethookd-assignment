@@ -313,6 +313,34 @@ Manual checks of the built API also confirmed identity 401 without a token,
 200 with a login token, health/identity 503 with PostgreSQL stopped, and recovery
 of both endpoints after restarting PostgreSQL without restarting the API.
 
+## Web authentication boundary
+
+`apps/web/src/auth.ts` exports typed `login(credentials)` and `getIdentity(token)`
+functions using relative `/api/auth/login` and `/api/auth/me` URLs. Responses are
+validated and reduced to JWT and public user fields (`id`, `username`). Identity
+comes from the server, never decoded claims. Requests omit cookies, disable cache
+and reject redirects; protected requests carry the token only in a Bearer header.
+`AuthError.kind` distinguishes `unauthenticated` (401), `unavailable` (network/5xx),
+`request` (other HTTP failures), `invalid_response`, and `storage`. Errors are
+sanitized; there are no automatic retries or implicit auth-state transitions.
+
+UI consumers explicitly call `storeToken`, `readToken`, and `clearToken` to persist
+only the JWT under `gethookd.auth.token` in `sessionStorage`. Malformed stored values
+are removed; missing values return null, and blocked storage reports a storage
+error. A restored token's shape is not proof of authentication: revalidate it with
+`getIdentity` before rendering protected content. No credentials or identity are
+persisted; localStorage and cookies are not used. The UI flow is not connected yet.
+Normal tab closure ends that tab's storage session, but browser session restore or
+duplicated tabs may preserve/copy it. Browser-readable storage is vulnerable to
+XSS; removing a token does not revoke a copy, and cross-tab logout is not guaranteed.
+
+```sh
+npm run test -w @gethookd/web -- src/auth.test.ts
+```
+
+These tests mock only HTTP boundaries and use real jsdom sessionStorage semantics;
+no browser E2E tooling is introduced.
+
 ## Web component tests
 
 ```sh
