@@ -1,6 +1,6 @@
 # API agent context
 
-Read [API structure](../../docs/agents/api-structure.md) before changing API structure. Inspect the relevant feature's public exports and existing patterns first.
+Read [API structure](../../docs/agents/file_tree.txt) before changing API structure. Inspect the relevant feature's public exports and existing patterns first.
 
 - Cross-feature imports use `index.ts`; within a feature, import siblings directly.
 - Keep business operations independent of Express and HTTP status codes.

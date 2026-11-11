@@ -1,0 +1,21 @@
+API structure — illustrative, not mandatory scaffolding. Create only what is needed.
+
+apps/api/
+  src/
+    app.ts                    # Application composition and route mounting
+    server.ts                 # Process startup/shutdown
+    config.ts                 # Configuration
+    db/                       # Database infrastructure and scripts
+    <feature>/                # Feature folders directly under src/
+      index.ts                # Explicit public exports for other features
+      routes.ts               # HTTP parsing, wiring and responses
+      service.ts              # Business operations, when useful; no Express
+      <descriptive-name>.ts    # Feature-specific concepts/capabilities
+    shared/                   # Feature-independent code only; no feature imports
+  tests/                      # Focused and integration tests
+
+Other features import index.ts; feature internals import siblings directly.
+Keep small helpers local. No empty layers, export *, or circular dependencies.
+Exceptions: app.ts may import routes.ts; focused tests may inspect internals;
+db/seed.ts may import auth/password.ts for demo credentials.
+Web and MCP call the API over HTTP. Preserve existing API behavior.
