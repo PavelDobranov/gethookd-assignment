@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "./app";
@@ -106,4 +106,99 @@ it("disables duplicate submissions while login is pending", async () => {
   );
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(sessionStorage.length).toBe(0);
+});
+
+it("revalidates restored tokens before rendering protected content", async () => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  let resolve: (value: Response) => void = () => {};
+  fetchMock.mockReturnValueOnce(
+    new Promise<Response>((done) => {
+      resolve = done;
+    }),
+  );
+  render(<App />);
+  expect(screen.getByRole("status").textContent).toMatch(/checking/i);
+  expect(screen.queryByText(user.username)).toBeNull();
+  expect(screen.queryByLabelText("Username")).toBeNull();
+  resolve(Response.json({ user }));
+  expect(await screen.findByText(user.username)).toBeDefined();
+  expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({
+    Authorization: `Bearer ${token}`,
+  });
+  expect(screen.getAllByRole("button")).toHaveLength(1);
+});
+
+it("clears rejected restored tokens and returns to login", async () => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  fetchMock.mockResolvedValueOnce(Response.json({}, { status: 401 }));
+  render(<App />);
+  expect(await screen.findByLabelText("Username")).toBeDefined();
+  expect(sessionStorage.length).toBe(0);
+  expect(screen.queryByText(user.username)).toBeNull();
+});
+
+it.each(["network", "server"])(
+  "blocks protected content on %s failure without retrying",
+  async (kind) => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+    if (kind === "network")
+      fetchMock.mockRejectedValueOnce(new TypeError("private details"));
+    else fetchMock.mockResolvedValueOnce(Response.json({}, { status: 503 }));
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /unavailable/i,
+    );
+    expect(screen.queryByText(user.username)).toBeNull();
+    expect(screen.queryByLabelText("Username")).toBeNull();
+    expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe(token);
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Log out" }));
+    expect(screen.getByLabelText("Username")).toBeDefined();
+    expect(sessionStorage.length).toBe(0);
+  },
+);
+
+it("does not persist a login token when identity verification rejects it", async () => {
+  fetchMock
+    .mockResolvedValueOnce(Response.json({ token, user }))
+    .mockResolvedValueOnce(Response.json({}, { status: 401 }));
+  render(<App />);
+  await submitLogin();
+  await screen.findByRole("alert");
+  expect(sessionStorage.length).toBe(0);
+  expect(screen.queryByText(user.username)).toBeNull();
+});
+
+it("keeps the login available with a useful error if storage is blocked", async () => {
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    throw new Error("blocked");
+  });
+  render(<App />);
+  expect((await screen.findByRole("alert")).textContent).toMatch(
+    /storage.*unavailable/i,
+  );
+  expect(screen.getByLabelText("Username")).toBeDefined();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("ignores a restored identity response after unmount", async () => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  let resolve: (value: Response) => void = () => {};
+  fetchMock.mockReturnValueOnce(
+    new Promise<Response>((done) => {
+      resolve = done;
+    }),
+  );
+  const { unmount } = render(<App />);
+  unmount();
+  sessionStorage.clear();
+  render(<App />);
+  await act(async () => {
+    resolve(Response.json({ user }));
+  });
+  await waitFor(() => expect(screen.getByLabelText("Username")).toBeDefined());
+  expect(screen.queryByText(user.username)).toBeNull();
 });

@@ -14,9 +14,10 @@ npm run setup
 npm run dev
 ```
 
-Open `http://localhost:5173`; the API is at `http://localhost:3000`. The current
-web page is still the scaffold; login/portal work is not implemented yet. A full
-built-web Compose stack is also not implemented yet.
+Open `http://localhost:5173`; the API is at `http://localhost:3000`. Sign in with
+`demo` / `demo-password` to see the server-verified username and Log out.
+Refresh revalidates the session through `/api/auth/me` before displaying it.
+A full built-web Compose stack and URL-specific navigation are not implemented yet.
 
 `setup` starts **only** Compose `db`, waits up to 30 seconds for healthy TCP
 readiness (120-second overall provisioning deadline, including image acquisition),
@@ -329,7 +330,13 @@ only the JWT under `gethookd.auth.token` in `sessionStorage`. Malformed stored v
 are removed; missing values return null, and blocked storage reports a storage
 error. A restored token's shape is not proof of authentication: revalidate it with
 `getIdentity` before rendering protected content. No credentials or identity are
-persisted; localStorage and cookies are not used. The UI flow is not connected yet.
+persisted; localStorage and cookies are not used. The connected login form supports
+keyboard submission, required fields, pending status and generic errors. It clears
+the password field on submission and checks `/me` before saving the returned JWT
+and rendering the username. Restored sessions show a loading state until verified;
+401 removes the token, while network/server failures show an unavailable state
+without automatic retries. Reload explicitly retries restoration; Log out clears
+the token and in-memory identity and returns to login.
 Normal tab closure ends that tab's storage session, but browser session restore or
 duplicated tabs may preserve/copy it. Browser-readable storage is vulnerable to
 XSS; removing a token does not revoke a copy, and cross-tab logout is not guaranteed.
@@ -347,8 +354,22 @@ no browser E2E tooling is introduced.
 npm run test -w @gethookd/web   # Vitest + jsdom + React Testing Library
 ```
 
-Component tests render the real app and explicitly clean up the DOM after each
-test to prevent cross-test leakage. No browser automation is required.
+Component tests render the real app with HTTP-boundary mocks and explicitly clean
+up the DOM after each test. They cover keyboard login/logout, JWT-only persistence,
+server-verified username, pending/error states, restoration, 401, unavailable
+service, blocked storage and late responses after unmount.
+
+```sh
+npm run test -w @gethookd/web -- src/app.test.tsx
+```
+
+Local runtime verification: `npm run setup` and `npm run dev` succeeded. In an
+isolated Chromium profile, keyboard login as demo displayed only `demo` and Log out;
+refresh restored demo, logout returned to login, and another refresh stayed logged
+out. Screenshots were inspected; no horizontal overflow occurred at widths
+320/768/1024/1440px and no console/runtime errors were observed. No Playwright or
+browser E2E suite is installed; E2E automation remains deferred until the full
+frontend is implemented.
 
 `npm test` explicitly requires API unit, PostgreSQL integration, and web suites,
 stopping with a nonzero exit for a missing workspace/test script, zero collected
