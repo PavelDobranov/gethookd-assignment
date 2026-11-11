@@ -1,11 +1,11 @@
 # API agent context
 
-Read [ADR 0001](../../docs/adr/0001-server-module-boundaries.md) before changing API structure. Inspect the relevant feature's public exports and existing patterns first.
+Read [API structure](../../docs/agents/api-structure.md) before changing API structure. Inspect the relevant feature's public exports and existing patterns first.
 
 - Cross-feature imports use `index.ts`; within a feature, import siblings directly.
 - Keep business operations independent of Express and HTTP status codes.
 - Shared code must be feature-independent and must not depend on business features. Avoid module cycles.
-- Only the ADR's explicit composition, bootstrap and focused-test exceptions allow internal access. Justify new exceptions.
+- Only the guide's explicit composition, bootstrap and focused-test exceptions allow internal access. Justify new exceptions.
 - Do not scaffold unused files/layers or change API behavior during structural work.
 
 Verify from the repository root:
