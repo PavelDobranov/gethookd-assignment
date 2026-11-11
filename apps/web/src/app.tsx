@@ -1,4 +1,10 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   AuthError,
   clearToken,
@@ -16,49 +22,62 @@ export default function App() {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
-  const mounted = useRef(false);
+  const generation = useRef(0);
 
-  useEffect(() => {
-    mounted.current = true;
-    let active = true;
-    async function restore() {
-      try {
-        const token = readToken();
-        if (token) {
-          const identity = await getIdentity(token);
-          if (active) setUser(identity.user);
-        }
-      } catch (failure) {
-        if (!active) return;
-        if (
-          failure instanceof AuthError &&
-          failure.kind === "unauthenticated"
-        ) {
-          try {
-            clearToken();
-          } catch {
-            setError(
-              "Session storage is unavailable. Close this tab to end the session.",
-            );
-          }
-        } else if (failure instanceof AuthError && failure.kind === "storage") {
-          setError("Session storage is unavailable. Enable it to sign in.");
-        } else {
-          setUnavailable(true);
+  const restore = useCallback(async () => {
+    const request = ++generation.current;
+    setUser(null);
+    setChecking(true);
+    setBusy(false);
+    setError("");
+    setUnavailable(false);
+    try {
+      const token = readToken();
+      if (token) {
+        const identity = await getIdentity(token);
+        if (request !== generation.current) return;
+        setUser(identity.user);
+        history.replaceState(null, "", "/portal");
+      } else {
+        history.replaceState(null, "", "/login");
+      }
+    } catch (failure) {
+      if (request !== generation.current) return;
+      if (failure instanceof AuthError && failure.kind === "unauthenticated") {
+        history.replaceState(null, "", "/login");
+        try {
+          clearToken();
+        } catch {
           setError(
-            "Authentication is unavailable. Reload to try again or log out.",
+            "Session storage is unavailable. Close this tab to end the session.",
           );
         }
-      } finally {
-        if (active) setChecking(false);
+      } else if (failure instanceof AuthError && failure.kind === "storage") {
+        history.replaceState(null, "", "/login");
+        setError("Session storage is unavailable. Enable it to sign in.");
+      } else {
+        setUnavailable(true);
+        setError("Authentication is unavailable. Retry or log out.");
       }
+    } finally {
+      if (request === generation.current) setChecking(false);
     }
-    void restore();
-    return () => {
-      active = false;
-      mounted.current = false;
-    };
   }, []);
+
+  useEffect(() => {
+    void restore();
+    const navigate = () => void restore();
+    const resume = (event: PageTransitionEvent) => {
+      if (event.persisted) void restore();
+    };
+    window.addEventListener("popstate", navigate);
+    window.addEventListener("pageshow", resume);
+    return () => {
+      generation.current++;
+      window.removeEventListener("popstate", navigate);
+      window.removeEventListener("pageshow", resume);
+    };
+  }, [restore]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,28 +90,34 @@ export default function App() {
     };
     const password = form.elements.namedItem("password");
     if (password instanceof HTMLInputElement) password.value = "";
+    const request = ++generation.current;
     setBusy(true);
     setError("");
     try {
       const result = await login(credentials);
-      if (!mounted.current) return;
+      if (request !== generation.current) return;
       const identity = await getIdentity(result.token);
-      if (!mounted.current) return;
+      if (request !== generation.current) return;
       storeToken(result.token);
       setUser(identity.user);
+      history.replaceState(null, "", "/portal");
     } catch (failure) {
-      if (!mounted.current) return;
+      if (request !== generation.current) return;
       setError(
         failure instanceof AuthError && failure.kind === "unauthenticated"
           ? "Check your username or password and try again."
           : "Sign-in is unavailable. Please try again later.",
       );
     } finally {
-      if (mounted.current) setBusy(false);
+      if (request === generation.current) setBusy(false);
     }
   }
 
   function logout() {
+    generation.current++;
+    setChecking(false);
+    setBusy(false);
+    history.replaceState(null, "", "/login");
     setUser(null);
     setUnavailable(false);
     try {
@@ -117,6 +142,9 @@ export default function App() {
     return (
       <main>
         <p role="alert">{error}</p>
+        <button type="button" onClick={() => void restore()}>
+          Retry
+        </button>
         <button type="button" onClick={logout}>
           Log out
         </button>

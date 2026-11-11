@@ -11,6 +11,7 @@ const fetchMock = vi.fn<typeof fetch>();
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  history.replaceState(null, "", "/");
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -61,6 +62,7 @@ it("submits by keyboard, verifies identity, stores only JWT and logs out", async
   expect(sessionStorage.length).toBe(1);
   expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe(token);
   expect(localStorage.length).toBe(0);
+  expect(location.pathname).toBe("/portal");
   expect(screen.getAllByRole("button")).toHaveLength(1);
   const keyboard = userEvent.setup();
   screen.getByRole("button", { name: "Log out" }).focus();
@@ -68,6 +70,7 @@ it("submits by keyboard, verifies identity, stores only JWT and logs out", async
   expect(screen.getByLabelText("Username")).toBeDefined();
   expect(screen.queryByText(user.username)).toBeNull();
   expect(sessionStorage.length).toBe(0);
+  expect(location.pathname).toBe("/login");
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
