@@ -275,7 +275,20 @@ There is deliberately **no expiration, refresh token, session store or
 revocation**. A copied token remains valid indefinitely with the same signing
 secret and existing user, even after client logout or an API restart. This is
 an approved local-demo limitation, not production authentication. Protected
-identity lookup and database-aware health checks are not implemented yet.
+identity lookup is available as `GET /api/auth/me`; database-aware health checks
+are not implemented yet.
+
+`GET /api/auth/me` accepts only `Authorization: Bearer <JWT>`. Each request
+verifies an HS256 signature and UUID subject, then resolves the current user
+from PostgreSQL. Success returns only `{ "user": { "id": "<string>",
+"username": "demo" } }`; missing/invalid tokens and deleted subjects return
+401 `UNAUTHENTICATED`. Cookies/query parameters never authenticate. Responses
+are not cached; database outages return 503, not 401, and unexpected errors
+remain sanitized. Changing `JWT_SECRET` invalidates old tokens.
+
+```sh
+npm run test:integration -w @gethookd/api -- tests/identity.test.ts
+```
 
 ```sh
 npm run test:integration -w @gethookd/api -- tests/login.test.ts

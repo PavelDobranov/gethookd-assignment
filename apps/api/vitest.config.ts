@@ -8,6 +8,7 @@ export default defineConfig({
           name: "unit",
           include: ["tests/**/*.test.ts"],
           exclude: [
+            "tests/identity.test.ts",
             "tests/login.test.ts",
             "tests/postgres.test.ts",
             "tests/db.test.ts",
@@ -19,6 +20,7 @@ export default defineConfig({
         test: {
           name: "postgres",
           include: [
+            "tests/identity.test.ts",
             "tests/login.test.ts",
             "tests/postgres.test.ts",
             "tests/db.test.ts",

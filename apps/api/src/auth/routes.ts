@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { type ErrorRequestHandler, json, Router } from "express";
 import type { createDatabase } from "../db/client.js";
 import { users } from "../db/schema.js";
-import { signToken } from "./jwt.js";
+import { signToken, verifySubject } from "./jwt.js";
 import { verifyPassword } from "./password.js";
 
 export type AuthOptions = {
@@ -93,6 +93,27 @@ export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
     }
     const token = await signToken(String(user.id), jwtSecret);
     res.json({ token, user: { id: String(user.id), username: user.username } });
+  });
+  router.get("/me", async (req, res) => {
+    const bearer =
+      /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i.exec(
+        req.get("authorization") ?? "",
+      );
+    const subject = bearer ? await verifySubject(bearer[1], jwtSecret) : null;
+    const [user] = subject
+      ? await db
+          .select({ id: users.id, username: users.username })
+          .from(users)
+          .where(eq(users.id, subject))
+          .limit(1)
+      : [];
+    if (!user) {
+      res.status(401).json({
+        error: { code: "UNAUTHENTICATED", message: "Authentication required." },
+      });
+      return;
+    }
+    res.json({ user: { id: String(user.id), username: user.username } });
   });
   const handleError: ErrorRequestHandler = (
     error: unknown,
