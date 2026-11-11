@@ -1,5 +1,8 @@
 import { errors, jwtVerify, SignJWT } from "jose";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function verifySubject(
   token: string,
   secret: string,
@@ -13,22 +16,24 @@ export async function verifySubject(
         requiredClaims: ["sub"],
       },
     );
+    const subject = payload.sub;
+
     // The database primary key is a UUID; reject malformed subjects before SQL.
-    return typeof payload.sub === "string" &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        payload.sub,
-      )
-      ? payload.sub
-      : null;
+    if (typeof subject !== "string" || !UUID_PATTERN.test(subject)) {
+      return null;
+    }
+
+    return subject;
   } catch (error) {
-    if (error instanceof errors.JOSEError) return null;
+    if (error instanceof errors.JOSEError) {
+      return null;
+    }
+
     throw error;
   }
 }
 
 export function signToken(userId: string, secret: string): Promise<string> {
-  // Deliberately no expiry or personal claims in the approved local-demo contract.
-  // https://github.com/panva/jose/blob/main/docs/jwt/sign/classes/SignJWT.md
   return new SignJWT({})
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(userId)

@@ -26,10 +26,12 @@ export function createRequireAuthentication(
       res.status(401).json({
         error: { code: "UNAUTHENTICATED", message: "Authentication required." },
       });
+
       return;
     }
 
     res.locals.user = user;
+
     next();
   };
 }
