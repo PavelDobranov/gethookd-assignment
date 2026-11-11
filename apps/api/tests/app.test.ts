@@ -8,14 +8,16 @@ import { createDatabase } from "../src/db/client.js";
 const database = createDatabase("postgresql://test:test@127.0.0.1:1/test");
 afterAll(database.close);
 
+let app: ReturnType<typeof createApp>;
 let server: Server | undefined;
 let baseUrl: string;
 
 beforeEach(async () => {
-  server = createApp({
+  app = createApp({
     db: database.db,
     jwtSecret: "app-test-only-signing-secret-at-least-32-bytes",
-  }).listen(0, "127.0.0.1");
+  });
+  server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") {
@@ -43,6 +45,33 @@ describe("API over HTTP", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       error: { code: "SERVICE_UNAVAILABLE", message: "Service unavailable." },
+    });
+  });
+
+  it("does not apply auth JSON parsing or cache policy to other routes", async () => {
+    app.post("/api/echo", (req, res) =>
+      res.json({ bodyParsed: req.body !== undefined }),
+    );
+    const response = await fetch(`${baseUrl}/api/echo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "42",
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ bodyParsed: false });
+    expect(response.headers.get("cache-control")).toBeNull();
+  });
+
+  it("keeps auth parser errors uncached and in the existing error format", async () => {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{",
+    });
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid JSON request." },
     });
   });
 

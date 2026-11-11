@@ -1,23 +1,17 @@
-import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
-import { type AuthOptions, createAuthRouter } from "./auth/routes.js";
+
+import { type AuthOptions, createAuthRouter } from "./auth/index.js";
+import { createHealthRouter } from "./health/routes.js";
+import { handleErrors } from "./shared/middleware/handle-errors.js";
 
 export function createApp(auth: AuthOptions): Express {
   const app = express();
 
-  app.get("/api/health", async (_req, res) => {
-    res.set("Cache-Control", "no-store");
-    try {
-      await auth.db.execute(sql`SELECT 1`);
-      res.json({ status: "ok" });
-    } catch {
-      res.status(503).json({
-        error: { code: "SERVICE_UNAVAILABLE", message: "Service unavailable." },
-      });
-    }
-  });
+  app.use("/api/health", createHealthRouter({ db: auth.db }));
 
   app.use("/api/auth", createAuthRouter(auth));
+
+  app.use(handleErrors);
 
   return app;
 }

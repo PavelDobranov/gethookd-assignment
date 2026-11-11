@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   type AuthenticatedLocals,
   createRequireAuthentication,
-} from "../src/auth/index.js";
+} from "../src/auth/middleware.js";
 
 let server: Server | undefined;
 

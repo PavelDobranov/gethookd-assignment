@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { DrizzleQueryError } from "drizzle-orm";
 import express from "express";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
-import { handleAuthError } from "../src/auth/errors.js";
+import { handleErrors } from "../src/shared/middleware/handle-errors.js";
 
 let server: Server;
 let origin: string;
@@ -13,7 +13,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.post("/", (_req, _res, next) => next(failure));
-  app.use(handleAuthError);
+  app.use(handleErrors);
   server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -73,10 +73,10 @@ it.each([
   expect(await response.json()).toEqual({
     error: {
       code: "SERVICE_UNAVAILABLE",
-      message: "Authentication service unavailable.",
+      message: "Service unavailable.",
     },
   });
-  expect(log.mock.calls).toEqual([["Authentication database unavailable."]]);
+  expect(log.mock.calls).toEqual([["Database unavailable."]]);
 });
 
 it.each([
@@ -93,10 +93,10 @@ it.each([
   expect(await response.json()).toEqual({
     error: {
       code: "SERVICE_UNAVAILABLE",
-      message: "Authentication service unavailable.",
+      message: "Service unavailable.",
     },
   });
-  expect(log.mock.calls).toEqual([["Authentication database unavailable."]]);
+  expect(log.mock.calls).toEqual([["Database unavailable."]]);
 });
 
 it("recognizes a code-less aggregate driver failure with explicit network errors", async () => {
@@ -135,7 +135,7 @@ it.each([
         message: "Internal server error.",
       },
     });
-    expect(log.mock.calls).toEqual([["Unexpected authentication failure."]]);
+    expect(log.mock.calls).toEqual([["Unexpected request failure."]]);
   },
 );
 

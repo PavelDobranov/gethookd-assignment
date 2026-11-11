@@ -205,7 +205,7 @@ it("distinguishes a real unavailable database from invalid credentials and unexp
   expect(await response.json()).toEqual({
     error: {
       code: "SERVICE_UNAVAILABLE",
-      message: "Authentication service unavailable.",
+      message: "Service unavailable.",
     },
   });
   await unauthorized(await fetch(`${unavailableOrigin}/api/auth/me`));

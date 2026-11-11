@@ -42,7 +42,7 @@ function databaseUnavailable(error: unknown): boolean {
   );
 }
 
-export const handleAuthError: ErrorRequestHandler = (
+export const handleErrors: ErrorRequestHandler = (
   error: unknown,
   _req,
   res,
@@ -67,17 +67,17 @@ export const handleAuthError: ErrorRequestHandler = (
   }
 
   if (databaseUnavailable(error)) {
-    console.error("Authentication database unavailable.");
+    console.error("Database unavailable.");
     res.status(503).json({
       error: {
         code: "SERVICE_UNAVAILABLE",
-        message: "Authentication service unavailable.",
+        message: "Service unavailable.",
       },
     });
     return;
   }
 
-  console.error("Unexpected authentication failure.");
+  console.error("Unexpected request failure.");
   res.status(500).json({
     error: { code: "INTERNAL_ERROR", message: "Internal server error." },
   });

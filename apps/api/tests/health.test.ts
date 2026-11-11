@@ -118,7 +118,7 @@ it("bounds protected query waits with real PostgreSQL locks and recovers after r
     expect(await response.json()).toEqual({
       error: {
         code: "SERVICE_UNAVAILABLE",
-        message: "Authentication service unavailable.",
+        message: "Service unavailable.",
       },
     });
     expect(performance.now() - start).toBeLessThan(4000);

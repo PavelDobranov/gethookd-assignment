@@ -272,7 +272,7 @@ it("returns sanitized 503 on real database connection failure, not a bad-credent
   expect(await response.json()).toEqual({
     error: {
       code: "SERVICE_UNAVAILABLE",
-      message: "Authentication service unavailable.",
+      message: "Service unavailable.",
     },
   });
 });
