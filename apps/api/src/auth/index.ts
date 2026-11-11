@@ -1,1 +1,1 @@
-export { type AuthOptions, createAuthRouter } from "./routes.js";
+export { type AuthOptions, createAuthRouter } from "./router.js";

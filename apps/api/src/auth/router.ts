@@ -1,4 +1,10 @@
-import { json, type Response, Router } from "express";
+import {
+  json,
+  type Request,
+  type RequestHandler,
+  type Response,
+  Router,
+} from "express";
 
 import type { createDatabase } from "../db/client.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
@@ -14,16 +20,10 @@ export type AuthOptions = {
   jwtSecret: string;
 };
 
-export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
-  const router = Router();
-  const auth = createAuthService(db, jwtSecret);
-  const requireAuthentication = createRequireAuthentication(auth);
-
-  router.use(disableCaching);
-  // Parse primitive JSON too so valid JSON with invalid field shape is a 422.
-  router.use(json({ limit: "16kb", strict: false, inflate: false }));
-
-  router.post("/login", async (req, res) => {
+function createLoginHandler(
+  auth: Pick<ReturnType<typeof createAuthService>, "login">,
+): RequestHandler {
+  return async function handleLogin(req, res) {
     const credentials = parseCredentials(req.body);
 
     if (!credentials) {
@@ -50,15 +50,28 @@ export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
     }
 
     res.json(session);
-  });
+  };
+}
 
-  router.get(
-    "/me",
-    requireAuthentication,
-    (_req, res: Response<unknown, AuthenticatedLocals>) => {
-      res.json({ user: res.locals.user });
-    },
-  );
+function handleGetMe(
+  _req: Request,
+  res: Response<unknown, AuthenticatedLocals>,
+) {
+  res.json({ user: res.locals.user });
+}
+
+export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
+  const router = Router();
+  const auth = createAuthService(db, jwtSecret);
+  const requireAuthentication = createRequireAuthentication(auth);
+  const handleLogin = createLoginHandler(auth);
+
+  router.use(disableCaching);
+  // Parse primitive JSON too so valid JSON with invalid field shape is a 422.
+  router.use(json({ limit: "16kb", strict: false, inflate: false }));
+
+  router.post("/login", handleLogin);
+  router.get("/me", requireAuthentication, handleGetMe);
 
   return router;
 }

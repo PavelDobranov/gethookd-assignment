@@ -1,7 +1,7 @@
 import express, { type Express } from "express";
 
 import { type AuthOptions, createAuthRouter } from "./auth/index.js";
-import { createHealthRouter } from "./health/routes.js";
+import { createHealthRouter } from "./health/router.js";
 import { handleErrors } from "./shared/middleware/handle-errors.js";
 
 export function createApp(auth: AuthOptions): Express {

@@ -8,7 +8,7 @@ apps/api/
     db/                       # Database infrastructure and scripts
     <feature>/                # Feature folders directly under src/
       index.ts                # Public API consumed by other production modules
-      routes.ts               # HTTP parsing, wiring and responses
+      router.ts               # HTTP parsing, wiring and responses
       service.ts              # Business operations, when useful; no Express
       <descriptive-name>.ts    # Feature-specific concepts/capabilities
     shared/                   # Feature-independent code only; no feature imports
@@ -21,6 +21,6 @@ Other features import index.ts; feature internals import siblings directly.
 Focused tests may import internal files directly without making those exports
 part of the public API. Prefer the public API when testing feature integration.
 Keep small helpers local. No empty layers, export *, or circular dependencies.
-Exceptions: app.ts may import routes.ts; focused tests may inspect internals;
+Exceptions: app.ts may import router.ts; focused tests may inspect internals;
 db/seed.ts may import auth/password.ts for demo credentials.
 Web and MCP call the API over HTTP. Preserve existing API behavior.

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { Router } from "express";
+import { type RequestHandler, Router } from "express";
 
 import type { createDatabase } from "../db/client.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
@@ -8,10 +8,8 @@ type HealthOptions = {
   db: ReturnType<typeof createDatabase>["db"];
 };
 
-export function createHealthRouter({ db }: HealthOptions) {
-  const router = Router();
-
-  router.get("/", disableCaching, async (_req, res) => {
+function createHealthHandler(db: HealthOptions["db"]): RequestHandler {
+  return async function handleHealth(_req, res) {
     try {
       await db.execute(sql`SELECT 1`);
       res.json({ status: "ok" });
@@ -20,7 +18,14 @@ export function createHealthRouter({ db }: HealthOptions) {
         error: { code: "SERVICE_UNAVAILABLE", message: "Service unavailable." },
       });
     }
-  });
+  };
+}
+
+export function createHealthRouter({ db }: HealthOptions) {
+  const router = Router();
+  const handleHealth = createHealthHandler(db);
+
+  router.get("/", disableCaching, handleHealth);
 
   return router;
 }
