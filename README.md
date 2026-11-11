@@ -20,7 +20,7 @@ Refresh revalidates the session through `/api/auth/me` before displaying it.
 `/` enters the auth flow: without a token it resolves to `/login`; a verified
 session resolves to `/portal`. Direct visits, refresh, browser Back and restored
 back-forward-cache pages revalidate before displaying protected content.
-A full built-web Compose stack is not implemented yet.
+The built-web Docker workflow below provides the same routes at port 8080.
 
 `setup` starts **only** Compose `db`, waits up to 30 seconds for healthy TCP
 readiness (120-second overall provisioning deadline, including image acquisition),
@@ -48,6 +48,69 @@ npm run db:studio    # Explicit local Studio, 127.0.0.1:4983; stop with Ctrl+C
 Studio connects to the configured database and prints its browser entry URL.
 It is never started by setup, dev, build, tests or default Compose services.
 All database commands share the configuration precedence described below.
+
+## Complete Docker workflow
+
+Requires Docker Engine and Docker Compose v2 supporting dependency conditions;
+host Node/npm, `.env`, `node_modules` and `dist` are not required.
+
+```sh
+docker compose up --build
+```
+
+Open `http://localhost:8080` and sign in with `demo` / `demo-password` (unless
+that user's password was deliberately changed). PostgreSQL must become healthy
+before the one-shot `setup` service applies committed migrations and seeds. Setup
+must exit successfully before API startup; API health gates the built web server.
+A failed setup blocks API/web startup: inspect `docker compose logs setup` and
+correct configuration/readiness rather than deleting data. There is no Studio
+service. DB/API/web published ports bind to loopback only (5432/3000/8080).
+
+Nginx serves compiled React assets, proxies `/api` and `/api/…` internally to the
+API, and serves the SPA for `/portal` deep links and refresh. Unknown API paths
+retain the API's 404 response, never the SPA fallback. `/api/auth/me` failures
+retain JSON errors/statuses. Auth responses remain non-cacheable.
+
+```sh
+docker compose down           # Stop/remove containers and network, KEEP DB data
+docker compose up --build     # Reapply pending migrations; preserve users/data
+```
+
+Local development and the complete stack are alternative workflows. Before
+switching from local development, stop API/Vite watchers (Ctrl+C). Before switching
+back, run `docker compose down`, then `npm run setup` and `npm run dev`. Both paths
+reuse the persistent database volume; neither resets credentials. An explicit
+`DATABASE_URL` must match the selected execution context; unset it to derive the
+appropriate host/container default. Never use volume deletion to switch workflows.
+
+Images build from the committed lockfile and source; `.dockerignore` excludes host
+dependencies, build output, `.env*` and key files. The API runs as the unprivileged
+Node user with production dependencies, compiled code and committed migrations.
+Setup uses the same image and compiled shared initializer, including Drizzle ORM's
+runtime migrator; it needs neither Drizzle Kit nor TypeScript tools at runtime.
+The container entrypoint calls the shared configuration loader in container context
+before launching either entry point. The web runtime contains only Nginx and built
+assets, not Vite/Node or server configuration. These are development/demo images,
+not a production deployment.
+
+Manual Docker verification used an isolated clean source snapshot with no host
+`node_modules`, `dist` or `.env`. `docker compose up --build -d` brought up the
+system at `localhost:8080`; a test-only override disabled the DB's host port to
+leave an existing developer database untouched. In isolated Chromium, direct
+`/portal`, keyboard login, refresh, logout and logged-out refresh worked, with
+no console/runtime errors. `/portal` returned the SPA, unknown `/api` returned the
+backend 404 (not SPA HTML), and unauthenticated `/api/auth/me` returned JSON 401.
+After `down` then `up --build -d`, demo ID/exact hash and an unrelated test user
+were byte-for-byte unchanged. Separate fresh-volume runs verified custom database
+credentials (including reserved password characters), a custom JWT secret, and an
+explicit encoded URL with a query option observed on actual database connections.
+An unreachable explicit URL and an explicitly empty URL both failed setup with
+API/web left unstarted. Test-owned resources were cleaned up; developer data was
+not modified.
+
+Packaging references: [Compose dependency conditions](https://docs.docker.com/compose/how-tos/startup-order/),
+[Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/),
+and [Nginx proxy URI handling](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass).
 
 ## API development and verification
 
@@ -117,12 +180,16 @@ automatically. Do not set `DATABASE_URL=` to mean unset: remove the setting.
 
 A localhost override cannot reach the host database from an application container.
 An explicit URL changes the application/setup target, not the credentials of a
-separate database. Drizzle commands use the same server loader in host context. Future setup/container
-consumers must select the appropriate context; local setup uses host context.
+separate database. Drizzle commands and local setup use the same server loader
+in host context; API/setup containers select container context.
 
-Compose currently starts **only PostgreSQL 17**, with `POSTGRES_*` defaults or
-overrides, a healthcheck using the configured user/database, persistent storage,
-and port 5432 bound to `127.0.0.1`. Explicitly empty initialization values fail at
+Compose's PostgreSQL 17 service uses `POSTGRES_*` defaults or overrides, a
+healthcheck using the configured user/database, persistent storage, and port 5432
+bound to `127.0.0.1`. API/setup receive those values plus optional `DATABASE_URL`
+and `JWT_SECRET` from the exported environment or root `.env`. Absent overrides
+stay absent so the shared loader derives defaults; explicit empty values are not
+replaced with defaults. The web receives none of these settings.
+Explicitly empty database initialization values fail at
 container startup instead of silently choosing defaults. To inspect configuration
 without starting services, run `docker compose config` (its output includes
 configured credentials: do not share it or run it in public logs with real secrets).
@@ -223,8 +290,8 @@ ownership of their database connection. `src/db/initialize.ts` owns one pool and
 uses Drizzle's PostgreSQL migrator to apply the same committed SQL/history as
 Drizzle Kit, then seeds and closes the pool even on failure. Migration paths are
 resolved from the module, independently of the working directory, for source and
-compiled execution. Both local setup and the future Compose setup entry point
-can use this initializer; API startup never imports or runs it.
+compiled execution. Both local setup and the one-shot Compose setup entry point
+use this initializer; API startup never imports or runs it.
 Database uniqueness and insert-on-conflict handling leave an existing demo ID and
 exact hash untouched. Repeated seeding and setup never reset
 a deliberately changed password or changes unrelated users. The documented demo
