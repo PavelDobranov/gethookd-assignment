@@ -8,6 +8,8 @@ export function createDatabase(databaseUrl: string) {
   const pool = new pg.Pool({
     connectionString: databaseUrl,
     connectionTimeoutMillis: 2000,
+    statement_timeout: 2000,
+    query_timeout: 2000,
   });
   // Idle clients can fail outside a query; pg removes them before reconnecting.
   // https://node-postgres.com/apis/pool#error

@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 
-// Health and unknown routes must not need a reachable database.
+// Unavailable health and unknown routes remain testable without PostgreSQL.
 const database = createDatabase("postgresql://test:test@127.0.0.1:1/test");
 afterAll(database.close);
 
@@ -35,12 +35,15 @@ afterEach(async () => {
 });
 
 describe("API over HTTP", () => {
-  it("returns the existing health contract", async () => {
+  it("reports unavailable health rather than process existence", async () => {
     const response = await fetch(`${baseUrl}/api/health`);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
     expect(response.headers.get("content-type")).toContain("application/json");
-    expect(await response.json()).toEqual({ status: "ok" });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "SERVICE_UNAVAILABLE", message: "Service unavailable." },
+    });
   });
 
   it("returns an API 404 rather than the SPA for an unknown API route", async () => {

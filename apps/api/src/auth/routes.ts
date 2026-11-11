@@ -33,6 +33,7 @@ function databaseUnavailable(error: unknown): boolean {
       if (
         /^(08|53|57P0)/.test(error.code) ||
         [
+          "57014", // statement_timeout cancels a query rather than rejecting credentials.
           "ECONNREFUSED",
           "ECONNRESET",
           "ETIMEDOUT",
@@ -49,6 +50,7 @@ function databaseUnavailable(error: unknown): boolean {
         "Connection terminated unexpectedly",
         "Connection terminated due to connection timeout",
         "timeout exceeded when trying to connect",
+        "Query read timeout",
       ].includes(error.message)
     )
       return true;
