@@ -2,6 +2,49 @@
 
 An ad-intelligence platform
 
+## Local development
+
+Prerequisites: the Node.js version in `.nvmrc`, npm, Docker Engine, and Docker
+Compose supporting `up --wait`. Ports 5432 (PostgreSQL), 3000 (API), and 5173
+(Vite) must be available. No `.env` file is required.
+
+```sh
+npm ci
+npm run setup
+npm run dev
+```
+
+Open `http://localhost:5173`; the API is at `http://localhost:3000`. The current
+web page is still the scaffold; login/portal work is not implemented yet. A full
+built-web Compose stack is also not implemented yet.
+
+`setup` starts **only** Compose `db`, waits up to 30 seconds for healthy TCP
+readiness (120-second overall provisioning deadline, including image acquisition),
+then runs the shared committed-migration → demo-seed initializer with a 60-second
+deadline. It never generates migrations or launches API, Vite or Studio. Repeats
+preserve all data and existing credentials. Run initializers sequentially, not in
+parallel. On timeout, cancellation or failure, later stages do not run; diagnostics
+identify readiness versus initialization without printing child SQL/credentials.
+Existing database storage is never deleted, including on failure.
+
+`npm run dev` starts only local API/Vite watchers; it does not start PostgreSQL,
+migrate, seed or launch Studio. Run setup first and stop conflicting services
+before starting dev. Stop watchers with Ctrl+C; `docker compose stop db` stops
+PostgreSQL without deleting storage. `docker compose down` also preserves storage.
+
+Explicit root commands forward to installed workspace-local tooling:
+
+```sh
+npm run db:generate  # Generate migrations for review/commit, never during startup
+npm run db:migrate   # Drizzle Kit applies committed pending migrations only
+npm run db:seed      # Insert demo only if absent; never reset credentials
+npm run db:studio    # Explicit local Studio, 127.0.0.1:4983; stop with Ctrl+C
+```
+
+Studio connects to the configured database and prints its browser entry URL.
+It is never started by setup, dev, build, tests or default Compose services.
+All database commands share the configuration precedence described below.
+
 ## API development and verification
 
 Use Node.js from `.nvmrc` and install workspace dependencies with `npm ci`
@@ -69,7 +112,7 @@ automatically. Do not set `DATABASE_URL=` to mean unset: remove the setting.
 A localhost override cannot reach the host database from an application container.
 An explicit URL changes the application/setup target, not the credentials of a
 separate database. Drizzle commands use the same server loader in host context. Future setup/container
-consumers must select the appropriate context; setup is not yet implemented.
+consumers must select the appropriate context; local setup uses host context.
 
 Compose currently starts **only PostgreSQL 17**, with `POSTGRES_*` defaults or
 overrides, a healthcheck using the configured user/database, persistent storage,
@@ -164,10 +207,15 @@ nonzero with a safe diagnostic if configuration or database access fails. It doe
 not generate or apply migrations. No passwords, hashes or connection URLs are
 printed.
 
-`src/db/seed.ts` exports reusable `seedDemoUser(db)` for the forthcoming setup
-initializer; imported callers retain ownership of their database connection.
+`src/db/seed.ts` exports reusable `seedDemoUser(db)`; imported callers retain
+ownership of their database connection. `src/db/initialize.ts` owns one pool and
+uses Drizzle's PostgreSQL migrator to apply the same committed SQL/history as
+Drizzle Kit, then seeds and closes the pool even on failure. Migration paths are
+resolved from the module, independently of the working directory, for source and
+compiled execution. Both local setup and the future Compose setup entry point
+can use this initializer; API startup never imports or runs it.
 Database uniqueness and insert-on-conflict handling leave an existing demo ID and
-exact hash untouched. Repeated seeding (and setup once introduced) never resets
+exact hash untouched. Repeated seeding and setup never reset
 a deliberately changed password or changes unrelated users. The documented demo
 password therefore stops working if someone deliberately changes it.
 
@@ -205,4 +253,4 @@ test to prevent cross-test leakage. No browser automation is required.
 stopping with a nonzero exit for a missing workspace/test script, zero collected
 tests, a failed prerequisite, or a failing test.
 `npm run build` builds and type-checks both workspaces; `npm run lint` runs Biome
-lint, and `npm run check` runs Biome checks across `apps/`.
+lint, and `npm run check` runs Biome checks across `apps/` and `scripts/`.

@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
     "db:seed": "tsx src/db/seed.ts",
-    "db:initialize": "tsx src/db/initialize.ts"
+    "db:initialize": "tsx src/db/initialize.ts",
+    "db:studio": "drizzle-kit studio --config=drizzle.config.ts --host=127.0.0.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
