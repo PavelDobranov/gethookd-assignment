@@ -37,5 +37,7 @@ npm run test -w @gethookd/web   # Vitest + jsdom + React Testing Library
 Component tests render the real app and explicitly clean up the DOM after each
 test to prevent cross-test leakage. No browser automation is required.
 
-`npm test` runs available workspace suites. `npm run build` builds workspaces;
-`npm run check` runs Biome across `apps/`.
+`npm test` explicitly requires both API and web suites, stopping with a nonzero
+exit for a missing workspace/test script, zero collected tests, or a failing test.
+`npm run build` builds and type-checks both workspaces; `npm run lint` runs Biome
+lint, and `npm run check` runs Biome checks across `apps/`.
