@@ -1,15 +1,21 @@
 import express, { type Express } from "express";
 
-import { type AuthOptions, createAuthRouter } from "./auth/index.js";
+import { createAuthRouter } from "./auth/index.js";
+import type { createDatabase } from "./db/client.js";
 import { createHealthRouter } from "./health/router.js";
 import { handleErrors } from "./shared/middleware/handle-errors.js";
 
-export function createApp(auth: AuthOptions): Express {
+type AppDependencies = {
+  db: ReturnType<typeof createDatabase>["db"];
+  jwtSecret: string;
+};
+
+export function createApp({ db, jwtSecret }: AppDependencies): Express {
   const app = express();
 
-  app.use("/api/health", createHealthRouter({ db: auth.db }));
+  app.use("/api/health", createHealthRouter({ db }));
 
-  app.use("/api/auth", createAuthRouter(auth));
+  app.use("/api/auth", createAuthRouter({ db, jwtSecret }));
 
   app.use(handleErrors);
 

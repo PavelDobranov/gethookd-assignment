@@ -4,11 +4,13 @@ import { type RequestHandler, Router } from "express";
 import type { createDatabase } from "../db/client.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
 
-type HealthOptions = {
+type HealthRouterDependencies = {
   db: ReturnType<typeof createDatabase>["db"];
 };
 
-function createHealthHandler(db: HealthOptions["db"]): RequestHandler {
+function createHealthHandler(
+  db: HealthRouterDependencies["db"],
+): RequestHandler {
   return async function handleHealth(_req, res) {
     try {
       await db.execute(sql`SELECT 1`);
@@ -21,7 +23,7 @@ function createHealthHandler(db: HealthOptions["db"]): RequestHandler {
   };
 }
 
-export function createHealthRouter({ db }: HealthOptions) {
+export function createHealthRouter({ db }: HealthRouterDependencies) {
   const router = Router();
   const handleHealth = createHealthHandler(db);
 

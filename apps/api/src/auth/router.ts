@@ -15,7 +15,7 @@ import {
 import { createAuthService } from "./service.js";
 import { parseCredentials } from "./validation.js";
 
-export type AuthOptions = {
+type AuthRouterDependencies = {
   db: ReturnType<typeof createDatabase>["db"];
   jwtSecret: string;
 };
@@ -60,7 +60,7 @@ function handleGetMe(
   res.json({ user: res.locals.user });
 }
 
-export function createAuthRouter({ db, jwtSecret }: AuthOptions) {
+export function createAuthRouter({ db, jwtSecret }: AuthRouterDependencies) {
   const router = Router();
   const auth = createAuthService(db, jwtSecret);
   const requireAuthentication = createRequireAuthentication(auth);
