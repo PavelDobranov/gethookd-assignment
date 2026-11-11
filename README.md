@@ -28,6 +28,28 @@ curl -i http://localhost:3000/api/health
 loopback listener on an ephemeral port per test and close it after each test.
 Tests live outside `src/` and are not included in the production build.
 
+## Server configuration
+
+`apps/api/src/config.ts` exports `loadConfig()` for server/database consumers.
+It reads the optional repository-root `.env` independently of the working
+directory, then applies exported environment variables (including explicit empty
+values, which fail validation). It does not mutate `process.env` or expose
+configuration to Vite. Missing `.env` is supported; other file-read failures are
+reported without revealing contents.
+
+Defaults are `gethookd` for `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
+`POSTGRES_DB`, plus a public development-only JWT signing placeholder of at least
+32 bytes. `JWT_SECRET` overrides must be at least 32 UTF-8 bytes. Empty,
+whitespace-only or control-character-containing settings fail with the variable
+name, never the value. `DATABASE_URL` must be a PostgreSQL URL with a host and
+database name.
+
+Without `DATABASE_URL`, `loadConfig()` derives an encoded URL at
+`localhost:5432`; container callers use `loadConfig({ context: "container" })`
+for `db:5432`. An explicit URL is preserved exactly, never rewritten for a
+context. Database and authentication consumers are introduced in later tasks;
+the current health endpoint remains process-only.
+
 ## Web component tests
 
 ```sh
