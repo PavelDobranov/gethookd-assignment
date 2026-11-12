@@ -2,18 +2,66 @@ services:
   db:
     image: postgres:17
     environment:
-      POSTGRES_USER: gethookd
-      POSTGRES_PASSWORD: gethookd
-      POSTGRES_DB: gethookd
+      POSTGRES_USER: ${POSTGRES_USER-gethookd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD-gethookd}
+      POSTGRES_DB: ${POSTGRES_DB-gethookd}
+    # Preserve unset defaults, but reject explicitly empty initialization values.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        : "$${POSTGRES_USER:?POSTGRES_USER must not be empty}"
+        : "$${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must not be empty}"
+        : "$${POSTGRES_DB:?POSTGRES_DB must not be empty}"
+        exec /usr/local/bin/docker-entrypoint.sh postgres
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gethookd -d gethookd"]
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 5s
       retries: 5
+
+  setup:
+    build: &api-build
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment: &app-environment
+      - POSTGRES_USER=${POSTGRES_USER-gethookd}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD-gethookd}
+      - POSTGRES_DB=${POSTGRES_DB-gethookd}
+      - DATABASE_URL
+      - JWT_SECRET
+    command: ["./apps/api/dist/db/initialize.js"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: *api-build
+    environment: *app-environment
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:

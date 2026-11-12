@@ -6,16 +6,22 @@
   ],
   "scripts": {
     "dev:db": "docker compose up -d db",
-    "dev": "npm run dev:db && concurrently --kill-others-on-fail -n api,web \"npm run dev -w @gethookd/api\" \"npm run dev -w @gethookd/web\"",
+    "dev": "concurrently --kill-others-on-fail -n api,web \"npm run dev -w @gethookd/api\" \"npm run dev -w @gethookd/web\"",
+    "setup": "node scripts/setup.mjs",
+    "db:generate": "npm run db:generate -w @gethookd/api",
+    "db:migrate": "npm run db:migrate -w @gethookd/api",
+    "db:seed": "npm run db:seed -w @gethookd/api",
+    "db:studio": "npm run db:studio -w @gethookd/api",
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm run test -w @gethookd/api && npm run test -w @gethookd/web",
     "lint": "biome lint .",
-    "format": "biome format --write apps/",
-    "check": "biome check apps/",
-    "check:fix": "biome check --write apps/"
+    "format": "biome format --write apps/ scripts/",
+    "check": "biome check apps/ scripts/",
+    "check:fix": "biome check --write apps/ scripts/"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",
-    "concurrently": "^10.0.7"
+    "concurrently": "^10.0.7",
+    "vitest": "^5.1.0"
   }
 }
