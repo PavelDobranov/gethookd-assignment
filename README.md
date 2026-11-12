@@ -175,8 +175,10 @@ configuration to Vite. Missing `.env` is supported; other file-read failures are
 reported without revealing contents.
 
 Defaults are `gethookd` for `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
-`POSTGRES_DB`, plus a public development-only JWT signing placeholder of at least
-32 bytes. `JWT_SECRET` overrides must be at least 32 UTF-8 bytes. Empty,
+`POSTGRES_DB`, plus separate public development-only JWT and cursor secrets.
+The `CURSOR_SECRET` default is
+`gethookd-public-development-cursor-secret-do-not-use-in-production`.
+`JWT_SECRET` and `CURSOR_SECRET` overrides must each be at least 32 UTF-8 bytes. Empty,
 whitespace-only or control-character-containing settings fail with the variable
 name, never the value. `DATABASE_URL` must be a PostgreSQL URL with a host and
 database name.
@@ -206,7 +208,8 @@ in host context; API/setup containers select container context.
 Compose's PostgreSQL 17 service uses `POSTGRES_*` defaults or overrides, a
 healthcheck using the configured user/database, persistent storage, and port 5432
 bound to `127.0.0.1`. API/setup receive those values plus optional `DATABASE_URL`
-and `JWT_SECRET` from the exported environment or root `.env`. Absent overrides
+and the independent `JWT_SECRET` and `CURSOR_SECRET` from the exported environment
+or root `.env`. Absent overrides
 stay absent so the shared loader derives defaults; explicit empty values are not
 replaced with defaults. The web receives none of these settings.
 Explicitly empty database initialization values fail at
@@ -220,10 +223,32 @@ passwords. `docker compose down` preserves the volume. Keep overrides consistent
 with its existing credentials, or deliberately administer the existing database;
 never delete a developer volume to make a configuration change work.
 
-These credentials and the default signing secret are public development fixtures.
-Production requires a private signing secret, non-demo credentials, HTTPS, and an
+These credentials and both default secrets are public development fixtures.
+Production requires separate private JWT and cursor secrets, non-demo credentials, HTTPS, and an
 authentication hardening review. No server settings use the `VITE_` prefix or are
 imported by the web app.
+
+### Cursor secret operations
+
+`CURSOR_SECRET` is server-only configuration reserved for v1 cursors; router/token
+consumers are not wired yet. Never reuse `JWT_SECRET` or API-key material, and never
+prefix this setting with `VITE_` or pass it to the web build. Neither startup path
+requires a `.env` file or manual secret setup for local development.
+
+To generate a private override, run `openssl rand -hex 32` and store the output as
+`CURSOR_SECRET` in the optional root `.env` or your server's secret environment.
+The same override is selected by `npm run dev` and `docker compose up --build`.
+Do not commit it, print it in logs, or share resolved Compose configuration.
+
+The v1 cursor contract requires a stable secret across ordinary API restarts and
+all API instances sharing a database. Once cursors are enabled, retaining the same
+secret and database history preserves otherwise valid, unexpired cursors; changing
+the secret invalidates existing cursors and clients must start fresh searches.
+After any database restore or replacement, rotate `CURSOR_SECRET` before serving
+requests, even if restoring the same database name. Restart host API processes or
+recreate API containers (`docker compose up -d --force-recreate api`) to apply the
+new value. Do not rotate `JWT_SECRET` as a substitute. No in-memory key registry or
+rotation UI is involved.
 
 ## Disposable PostgreSQL integration tests
 
