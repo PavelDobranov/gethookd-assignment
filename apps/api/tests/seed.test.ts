@@ -256,7 +256,9 @@ it("preserves changed world rows and keys while restoring missing fixture IDs on
   const keysBefore = await db.select().from(apiKeys);
   await seedDatabase(db);
   expect(await db.select().from(ads).where(eq(ads.id, first.id))).toEqual([changed]);
-  expect(await db.select().from(ads).where(eq(ads.id, missing.id))).toEqual([missing]);
+  expect(await db.select().from(ads).where(eq(ads.id, missing.id))).toEqual([
+    { ...missing, insertedXid: expect.stringMatching(/^\d+$/) },
+  ]);
   expect(await db.select().from(brands).where(eq(brands.id, first.brandId))).toEqual([
     { id: first.brandId, name: "Changed brand" },
   ]);
@@ -278,7 +280,9 @@ it("round-trips a partial batch with quoted Unicode text, arrays, nulls and offs
     })),
   };
   await db.transaction((tx) => seedWorld(tx, batch));
-  expect(await db.select().from(ads).orderBy(ads.id)).toEqual(batch.ads);
+  expect(await db.select().from(ads).orderBy(ads.id)).toEqual(
+    batch.ads.map((ad) => ({ ...ad, insertedXid: expect.stringMatching(/^\d+$/) })),
+  );
 });
 
 it("repairs an occupied missing-fixture rank above both existing and full-fixture maxima", async () => {
@@ -298,7 +302,9 @@ it("repairs an occupied missing-fixture rank above both existing and full-fixtur
     ...fixtures.ads.filter((ad) => ad.brandId === ranked.brandId).map((ad) => ad.impressionRank ?? 0),
   );
   expect(repaired.impressionRank).toBe(maximum + 1);
-  expect(await db.select().from(ads).where(eq(ads.id, occupied.id))).toEqual([occupied]);
+  expect(await db.select().from(ads).where(eq(ads.id, occupied.id))).toEqual([
+    { ...occupied, insertedXid: expect.stringMatching(/^\d+$/) },
+  ]);
   await db.transaction((tx) => seedWorld(tx, brandFixtures));
   expect(await db.select().from(ads).where(eq(ads.id, ranked.id))).toEqual([repaired]);
 });
