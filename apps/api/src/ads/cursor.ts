@@ -111,7 +111,7 @@ function calendarDate(value: unknown): value is string {
 function validSnapshot(value: unknown): value is string {
   if (typeof value !== "string" || !/^[0-9]+:[0-9]+:(?:[0-9]+(?:,[0-9]+)*)?$/.test(value)) return false;
   const [minText, maxText, activeText] = value.split(":");
-  const xid = (text: string) => /^(?:0|[1-9][0-9]{0,19})$/.test(text) && BigInt(text) <= maxXid;
+  const xid = (text: string) => /^[1-9][0-9]{0,19}$/.test(text) && BigInt(text) <= maxXid;
   if (!xid(minText) || !xid(maxText)) return false;
   const min = BigInt(minText);
   const max = BigInt(maxText);
@@ -160,7 +160,14 @@ function validState(value: unknown): value is CursorState {
     return false;
   const position = value.position;
   const keys = value.query.sort === "newest" ? ["startDate", "id"] : ["rank", "id"];
-  if (!hasKeys(position, keys) || typeof position.id !== "string" || !position.id || position.id.includes("\0"))
+  if (
+    !hasKeys(position, keys) ||
+    typeof position.id !== "string" ||
+    !position.id ||
+    position.id.includes("\0") ||
+    // A PostgreSQL text ID must survive UTF-8 encoding without replacement.
+    Buffer.from(position.id, "utf8").toString("utf8") !== position.id
+  )
     return false;
   return value.query.sort === "newest"
     ? calendarDate(position.startDate)

@@ -230,7 +230,7 @@ imported by the web app.
 
 ### Cursor secret operations
 
-`CURSOR_SECRET` is server-only configuration reserved for v1 cursors; router/token
+`CURSOR_SECRET` is server-only configuration for the v1 cursor codec; HTTP/search
 consumers are not wired yet. Never reuse `JWT_SECRET` or API-key material, and never
 prefix this setting with `VITE_` or pass it to the web build. Neither startup path
 requires a `.env` file or manual secret setup for local development.
@@ -249,6 +249,28 @@ requests, even if restoring the same database name. Restart host API processes o
 recreate API containers (`docker compose up -d --force-recreate api`) to apply the
 new value. Do not rotate `JWT_SECRET` as a substitute. No in-memory key registry or
 rotation UI is involved.
+
+The internal codec (`apps/api/src/ads/cursor.ts`) uses Node AES-256-GCM with a
+SHA-256-derived, domain-separated key, fresh 12-byte nonces, 16-byte tags and
+authenticated version context. Tokens carry only normalized query/sort, insertion
+snapshot, last position and original issue/expiry times—not credentials or result
+lists. `issue` starts a 30-minute lifetime using the injected clock; continuation
+code must use `encode` on decoded state with an updated position, preserving the
+original times. `decode` authenticates before validating state or reporting expiry.
+Tokens can be replayed; they never authorize a request.
+
+Both input and output are limited to 4096 ASCII base64url characters. Invalid,
+unsupported, tampered or wrong-secret tokens raise sanitized `INVALID_CURSOR`;
+at or after expiry, authenticated valid tokens raise `CURSOR_EXPIRED`. Both require
+an unmodified valid token or a fresh search, not a silent restart. Oversized
+server-generated state fails explicitly rather than truncating the snapshot; this
+bounds supported concurrent snapshot metadata, not the result count. These error
+codes are internal until the v1 HTTP boundary is connected.
+
+Focused verification: `npm run test:unit -w @gethookd/api -- tests/v1-cursor.test.ts`
+covers both sorts, null ranks, replay/reconstruction, tampering, authenticated
+payload validation, nonce variation, exact size/expiry boundaries and retained
+original expiry with deterministic clocks.
 
 ## Disposable PostgreSQL integration tests
 
