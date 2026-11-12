@@ -49,9 +49,7 @@ describe("API over HTTP", () => {
   });
 
   it("does not apply auth JSON parsing or cache policy to other routes", async () => {
-    app.post("/api/echo", (req, res) =>
-      res.json({ bodyParsed: req.body !== undefined }),
-    );
+    app.post("/api/echo", (req, res) => res.json({ bodyParsed: req.body !== undefined }));
     const response = await fetch(`${baseUrl}/api/echo`, {
       method: "POST",
       headers: { "content-type": "application/json" },

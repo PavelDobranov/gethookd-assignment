@@ -13,11 +13,9 @@ const storedHash = `scrypt$131072$8$1$${"a".repeat(32)}$${"b".repeat(128)}`;
 
 it("propagates unexpected asynchronous scrypt failures", async () => {
   const failure = new Error("Cryptographic operation failed");
-  vi.mocked(scrypt).mockImplementationOnce(
-    (_password, _salt, _length, _options, callback) => {
-      callback(failure, Buffer.alloc(0));
-    },
-  );
+  vi.mocked(scrypt).mockImplementationOnce((_password, _salt, _length, _options, callback) => {
+    callback(failure, Buffer.alloc(0));
+  });
   await expect(verifyPassword("password", storedHash)).rejects.toBe(failure);
 });
 

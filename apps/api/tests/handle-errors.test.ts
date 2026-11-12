@@ -17,8 +17,7 @@ beforeAll(async () => {
   server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("Expected TCP listener");
+  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   origin = `http://127.0.0.1:${address.port}`;
 });
 
@@ -31,11 +30,7 @@ afterAll(
 );
 
 function queryFailure(cause: Error) {
-  return new DrizzleQueryError(
-    "SELECT private-query",
-    ["private-parameter"],
-    cause,
-  );
+  return new DrizzleQueryError("SELECT private-query", ["private-parameter"], cause);
 }
 
 async function request() {
@@ -64,9 +59,7 @@ it.each([
   "ENOTFOUND",
   "EAI_AGAIN",
 ])("returns a safe 503 for database failure %s", async (code) => {
-  failure = queryFailure(
-    Object.assign(new Error("private-connection-string"), { code }),
-  );
+  failure = queryFailure(Object.assign(new Error("private-connection-string"), { code }));
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   const response = await request();
   expect(response.status).toBe(503);
@@ -81,14 +74,8 @@ it.each([
 
 it.each([
   ["client query_timeout", new Error("Query read timeout")],
-  [
-    "client connectionTimeoutMillis",
-    new Error("Connection terminated due to connection timeout"),
-  ],
-  [
-    "server statement_timeout",
-    Object.assign(new Error("private-query"), { code: "57014" }),
-  ],
+  ["client connectionTimeoutMillis", new Error("Connection terminated due to connection timeout")],
+  ["server statement_timeout", Object.assign(new Error("private-query"), { code: "57014" })],
 ])("returns a safe 503 for %s", async (_path, cause) => {
   failure = queryFailure(cause);
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -104,11 +91,7 @@ it.each([
 });
 
 it("recognizes a code-less aggregate driver failure with explicit network errors", async () => {
-  failure = queryFailure(
-    new AggregateError([
-      Object.assign(new Error("private-address"), { code: "ECONNREFUSED" }),
-    ]),
-  );
+  failure = queryFailure(new AggregateError([Object.assign(new Error("private-address"), { code: "ECONNREFUSED" })]));
   vi.spyOn(console, "error").mockImplementation(() => {});
   expect((await request()).status).toBe(503);
 });
@@ -118,42 +101,32 @@ it.each([
   queryFailure(new Error("Connection terminated unexpectedly")),
   new Error("Query read timeout"),
   new Error("Connection terminated due to connection timeout"),
+  queryFailure(new Error("private-sql Connection terminated due to connection timeout")),
   queryFailure(
-    new Error("private-sql Connection terminated due to connection timeout"),
-  ),
-  queryFailure(
-    Object.assign(
-      new Error("Connection terminated due to connection timeout"),
-      {
-        code: "42P01",
-      },
-    ),
+    Object.assign(new Error("Connection terminated due to connection timeout"), {
+      code: "42P01",
+    }),
   ),
   queryFailure(new Error("private-sql Query read timeout")),
-  queryFailure(
-    Object.assign(new Error("Query read timeout"), { code: "42P01" }),
-  ),
+  queryFailure(Object.assign(new Error("Query read timeout"), { code: "42P01" })),
   queryFailure(Object.assign(new Error("private-sql"), { code: "42P01" })),
   queryFailure(Object.assign(new Error("private-sql"), { code: "23505" })),
   queryFailure(Object.assign(new Error("private-sql"), { code: "57P09" })),
   queryFailure(new AggregateError([])),
   queryFailure(new AggregateError([new Error("unknown driver failure")])),
-])(
-  "returns a safe logged 500 for an unclassified failure (%#)",
-  async (error) => {
-    failure = error;
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const response = await request();
-    expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "Internal server error.",
-      },
-    });
-    expect(log.mock.calls).toEqual([["Unexpected request failure."]]);
-  },
-);
+])("returns a safe logged 500 for an unclassified failure (%#)", async (error) => {
+  failure = error;
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await request();
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({
+    error: {
+      code: "INTERNAL_ERROR",
+      message: "Internal server error.",
+    },
+  });
+  expect(log.mock.calls).toEqual([["Unexpected request failure."]]);
+});
 
 it("does not log malformed JSON or expose its contents", async () => {
   const log = vi.spyOn(console, "error").mockImplementation(() => {});

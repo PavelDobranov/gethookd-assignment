@@ -24,8 +24,7 @@ async function listen(db = connection.db) {
   servers.push(server);
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("Expected TCP listener");
+  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   return `http://127.0.0.1:${address.port}`;
 }
 
@@ -44,9 +43,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const server of servers) {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
   await connection.close();
   for (const extra of extras) await extra.close();
@@ -69,9 +66,7 @@ it("reports public uncached PostgreSQL readiness without requiring credentials",
 });
 
 it("returns a generic 503 for an actual refused database connection", async () => {
-  const refused = createDatabase(
-    "postgresql://private:private@127.0.0.1:1/private",
-  );
+  const refused = createDatabase("postgresql://private:private@127.0.0.1:1/private");
   extras.push(refused);
   await unavailable(await fetch(`${await listen(refused.db)}/api/health`));
 });
@@ -86,17 +81,11 @@ it.each(["health", "login", "identity"])(
     }).listen(0, "127.0.0.1");
     await once(peer, "listening");
     const address = peer.address();
-    if (!address || typeof address === "string")
-      throw new Error("Expected TCP peer");
-    const stalled = createDatabase(
-      `postgresql://private:private@127.0.0.1:${address.port}/private`,
-    );
+    if (!address || typeof address === "string") throw new Error("Expected TCP peer");
+    const stalled = createDatabase(`postgresql://private:private@127.0.0.1:${address.port}/private`);
     try {
       const stalledOrigin = await listen(stalled.db);
-      const path =
-        route === "health"
-          ? "/api/health"
-          : `/api/auth/${route === "login" ? "login" : "me"}`;
+      const path = route === "health" ? "/api/health" : `/api/auth/${route === "login" ? "login" : "me"}`;
       const options =
         route === "login"
           ? {

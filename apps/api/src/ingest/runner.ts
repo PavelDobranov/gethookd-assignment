@@ -20,19 +20,27 @@ export async function runIngest({
 }): Promise<number> {
   const controller = new AbortController();
   const stop = () => controller.abort();
+
   signals.on("SIGINT", stop);
   signals.on("SIGTERM", stop);
+
   let resource: IngestResource | undefined;
   let exitCode = 0;
+
   try {
     resource = open();
+
     while (!controller.signal.aborted) {
       try {
         await wait(1000, controller.signal);
       } catch (error) {
         if (!controller.signal.aborted) throw error;
       }
-      if (controller.signal.aborted) break;
+
+      if (controller.signal.aborted) {
+        break;
+      }
+
       // A tick settles (including rollback) before another wait or pool cleanup.
       await resource.tick();
     }
@@ -50,5 +58,6 @@ export async function runIngest({
       signals.off("SIGTERM", stop);
     }
   }
+
   return exitCode;
 }

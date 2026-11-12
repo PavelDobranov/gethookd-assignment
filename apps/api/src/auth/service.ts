@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+
 import type { createDatabase } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { signToken, verifySubject } from "./jwt.js";
@@ -14,11 +15,7 @@ export type Credentials = {
 export function createAuthService(db: Database, jwtSecret: string) {
   return {
     async login({ username, password }: Credentials) {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.username, username))
-        .limit(1);
+      const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
 
       if (!user || !(await verifyPassword(password, user.passwordHash))) {
         return null;

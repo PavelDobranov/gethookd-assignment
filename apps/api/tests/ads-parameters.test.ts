@@ -18,12 +18,9 @@ describe("v0 pagination", () => {
     ["page=9007199254740991&per_page=1", 9007199254740991, 1, 9007199254740990],
     ["page=90071992547410&per_page=101", 90071992547410, 100, 9007199254740900],
     ["page=3002399751580331&per_page=3", 3002399751580331, 3, 9007199254740990],
-  ])(
-    "parses %s to page=%s, perPage=%s, offset=%s",
-    (query, page, perPage, offset) => {
-      expect(parse(query)).toMatchObject({ page, perPage, offset });
-    },
-  );
+  ])("parses %s to page=%s, perPage=%s, offset=%s", (query, page, perPage, offset) => {
+    expect(parse(query)).toMatchObject({ page, perPage, offset });
+  });
 
   for (const name of ["page", "per_page"]) {
     it.each([
@@ -47,14 +44,9 @@ describe("v0 pagination", () => {
       "9007199254740992",
       "9007199254740993",
       "99999999999999999999999999999999999999999999",
-    ])(
-      `rejects invalid ${name}=%j without partial parsing or clamping unsafe input`,
-      (value) => {
-        expect(
-          parse(new URLSearchParams({ [name]: value }).toString()),
-        ).toBeNull();
-      },
-    );
+    ])(`rejects invalid ${name}=%j without partial parsing or clamping unsafe input`, (value) => {
+      expect(parse(new URLSearchParams({ [name]: value }).toString())).toBeNull();
+    });
   }
 
   it.each([
@@ -69,16 +61,13 @@ describe("v0 pagination", () => {
 
 describe("raw v0 parameters", () => {
   it("preserves a scalar key without authenticating or trimming it", () => {
-    expect(
-      parseAdParameters(new URLSearchParams("api_key=+key+")),
-    ).toMatchObject({
+    expect(parseAdParameters(new URLSearchParams("api_key=+key+"))).toMatchObject({
       apiKey: " key ",
     });
   });
 
-  it.each(["", "api_key=", "api_key[x]=key"])(
-    "rejects missing or empty scalar key: %s",
-    (query) => expect(parseAdParameters(new URLSearchParams(query))).toBeNull(),
+  it.each(["", "api_key=", "api_key[x]=key"])("rejects missing or empty scalar key: %s", (query) =>
+    expect(parseAdParameters(new URLSearchParams(query))).toBeNull(),
   );
 
   it.each(["q", "niche", "format", "status", "page", "per_page", "api_key"])(
@@ -103,31 +92,21 @@ describe("raw v0 parameters", () => {
     expect(parse("n%69che=fitness&niche=fitness")).toBeNull();
   });
 
-  it.each(["", " Serum %_ ", "a+b", "猫\\test"])(
-    "preserves q as a literal substring: %s",
-    (q) =>
-      expect(parse(new URLSearchParams({ q }).toString())).toMatchObject({ q }),
+  it.each(["", " Serum %_ ", "a+b", "猫\\test"])("preserves q as a literal substring: %s", (q) =>
+    expect(parse(new URLSearchParams({ q }).toString())).toMatchObject({ q }),
   );
 
   it("defaults missing q to the empty substring", () => {
     expect(parse()).toMatchObject({ q: "" });
   });
 
-  it.each(niches)(
-    "normalizes slug and display name for $slug case-insensitively",
-    ({ slug, name }) => {
-      for (const niche of [
-        slug,
-        name,
-        slug.toUpperCase(),
-        name.toUpperCase(),
-      ]) {
-        expect(parse(new URLSearchParams({ niche }).toString())).toMatchObject({
-          niche: slug,
-        });
-      }
-    },
-  );
+  it.each(niches)("normalizes slug and display name for $slug case-insensitively", ({ slug, name }) => {
+    for (const niche of [slug, name, slug.toUpperCase(), name.toUpperCase()]) {
+      expect(parse(new URLSearchParams({ niche }).toString())).toMatchObject({
+        niche: slug,
+      });
+    }
+  });
 
   it.each(["", "unknown", " skincare", "Skincare ", " Pet Supplies "])(
     "omits invalid niche without trimming: %s",

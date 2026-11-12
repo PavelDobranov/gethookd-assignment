@@ -11,9 +11,7 @@ beforeAll(async () => {
 describe("password hashing", () => {
   it("records parameters and random salts, never plaintext", async () => {
     const secondHash = await hashPassword(password);
-    expect(storedHash).toMatch(
-      /^scrypt\$131072\$8\$1\$[a-f0-9]{32}\$[a-f0-9]{128}$/,
-    );
+    expect(storedHash).toMatch(/^scrypt\$131072\$8\$1\$[a-f0-9]{32}\$[a-f0-9]{128}$/);
     expect(secondHash).not.toBe(storedHash);
     expect(secondHash.split("$")[4]).not.toBe(storedHash.split("$")[4]);
     expect(storedHash).not.toContain(password);
@@ -33,12 +31,7 @@ describe("password hashing", () => {
   });
 
   it("rejects wrong passwords, including case changes and added whitespace", async () => {
-    for (const wrong of [
-      "wrong-password",
-      "Demo-password",
-      ` ${password}`,
-      `${password} `,
-    ]) {
+    for (const wrong of ["wrong-password", "Demo-password", ` ${password}`, `${password} `]) {
       expect(await verifyPassword(wrong, storedHash)).toBe(false);
     }
   });
@@ -52,42 +45,29 @@ describe("password hashing", () => {
 
   it("accepts the maximum password length", async () => {
     const longest = "x".repeat(1024);
-    expect(await verifyPassword(longest, await hashPassword(longest))).toBe(
-      true,
-    );
+    expect(await verifyPassword(longest, await hashPassword(longest))).toBe(true);
   });
 
   it.each(["", "x".repeat(1025), null, undefined, 42, {}])(
     "rejects invalid password input %# without exposing it",
     async (input) => {
-      await expect(
-        Reflect.apply(hashPassword, undefined, [input]),
-      ).rejects.toThrow(
+      await expect(Reflect.apply(hashPassword, undefined, [input])).rejects.toThrow(
         "Password must be a nonempty string of at most 1024 characters",
       );
-      expect(
-        await Reflect.apply(verifyPassword, undefined, [input, storedHash]),
-      ).toBe(false);
+      expect(await Reflect.apply(verifyPassword, undefined, [input, storedHash])).toBe(false);
     },
   );
 
   it.each([null, undefined, 42, {}, "", "x".repeat(10000)])(
     "safely rejects invalid stored hash input %#",
     async (input) => {
-      expect(
-        await Reflect.apply(verifyPassword, undefined, [password, input]),
-      ).toBe(false);
+      expect(await Reflect.apply(verifyPassword, undefined, [password, input])).toBe(false);
     },
   );
 
   it("rejects damaged or unsupported formats and cost parameters", async () => {
     const parts = storedHash.split("$");
-    const malformed = [
-      `${storedHash}$extra`,
-      storedHash.slice(0, -1),
-      ` ${storedHash}`,
-      `${storedHash}\n`,
-    ];
+    const malformed = [`${storedHash}$extra`, storedHash.slice(0, -1), ` ${storedHash}`, `${storedHash}\n`];
     for (const [index, value] of [
       [0, "argon2"],
       [1, "1073741824"],
@@ -115,8 +95,7 @@ describe("password hashing", () => {
   it("rejects tampered salts and same-length derived keys", async () => {
     for (const index of [4, 5]) {
       const parts = storedHash.split("$");
-      parts[index] =
-        (parts[index][0] === "0" ? "1" : "0") + parts[index].slice(1);
+      parts[index] = (parts[index][0] === "0" ? "1" : "0") + parts[index].slice(1);
       expect(await verifyPassword(password, parts.join("$"))).toBe(false);
     }
   });

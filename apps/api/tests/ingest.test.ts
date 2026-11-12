@@ -20,12 +20,9 @@ describe("controlled ingest fields", () => {
   it.each([
     [0.299999, 0, "2026-12-31"],
     [0, 0.999999, "2026-10-03"],
-  ])(
-    "backdates below 30%% with inclusive 1–90 UTC-day bounds",
-    (chance, days, date) => {
-      expect(generate(0, 0, chance, days, 0.4).startDate).toBe(date);
-    },
-  );
+  ])("backdates below 30%% with inclusive 1–90 UTC-day bounds", (chance, days, date) => {
+    expect(generate(0, 0, chance, days, 0.4).startDate).toBe(date);
+  });
 
   it.each([0.3, 0.999999])("uses today at or above 30%%", (chance) => {
     expect(generate(0, 0, chance, 0.4).startDate).toBe("2027-01-01");
@@ -67,9 +64,7 @@ describe("controlled ingest fields", () => {
       countries,
     })),
   )("rejects invalid country arrays/members: $countries", ({ countries }) => {
-    expect(() => validateIngestCountries(countries)).toThrow(
-      "Invalid ingest countries",
-    );
+    expect(() => validateIngestCountries(countries)).toThrow("Invalid ingest countries");
   });
   it("accepts arrays of valid ISO-2 codes", () => {
     expect(() => validateIngestCountries(["US", "GB"])).not.toThrow();

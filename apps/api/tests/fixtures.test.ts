@@ -25,24 +25,15 @@ describe("deterministic ad world", () => {
     const { brands, ads } = generateFixtures();
     expect(brands).toHaveLength(300);
     expect(ads).toHaveLength(20_000);
-    expect(brands.map((brand) => brand.id)).toEqual(
-      Array.from({ length: 300 }, (_, index) => index + 1),
-    );
+    expect(brands.map((brand) => brand.id)).toEqual(Array.from({ length: 300 }, (_, index) => index + 1));
     expect(new Set(brands.map((brand) => brand.name)).size).toBe(300);
     expect(ads.map((ad) => ad.id)).toEqual(
-      Array.from(
-        { length: 20_000 },
-        (_, index) => `seed-ad-${String(index + 1).padStart(6, "0")}`,
-      ),
+      Array.from({ length: 20_000 }, (_, index) => `seed-ad-${String(index + 1).padStart(6, "0")}`),
     );
     expect(ads.filter((ad) => ad.status === "active")).toHaveLength(12_000);
     expect(ads.filter((ad) => ad.impressionRank === null)).toHaveLength(8_000);
-    expect(new Set(ads.map((ad) => ad.format))).toEqual(
-      new Set(["image", "video", "carousel"]),
-    );
-    expect(new Set(ads.map((ad) => ad.niche))).toEqual(
-      new Set(niches.map((niche) => niche.slug)),
-    );
+    expect(new Set(ads.map((ad) => ad.format))).toEqual(new Set(["image", "video", "carousel"]));
+    expect(new Set(ads.map((ad) => ad.niche))).toEqual(new Set(niches.map((niche) => niche.slug)));
     for (const brand of brands) {
       expect(brand.name.length).toBeGreaterThan(0);
       expect(ads.some((ad) => ad.brandId === brand.id)).toBe(true);
@@ -52,9 +43,7 @@ describe("deterministic ad world", () => {
   it("includes every required keyword in its niche's headlines", () => {
     const { ads } = generateFixtures();
     for (const niche of niches) {
-      const headlines = ads
-        .filter((ad) => ad.niche === niche.slug)
-        .map((ad) => ad.headline);
+      const headlines = ads.filter((ad) => ad.niche === niche.slug).map((ad) => ad.headline);
       for (const keyword of niche.keywords) {
         expect(
           headlines.some((headline) => headline.includes(keyword)),
@@ -77,20 +66,14 @@ describe("deterministic ad world", () => {
       expect(ad.countries.length).toBeGreaterThan(0);
       expect(ad.countries.every(isCountryCode)).toBe(true);
       expect(new Set(ad.countries).size).toBe(ad.countries.length);
-      expect(new Date(ad.startDate).toISOString().slice(0, 10)).toBe(
-        ad.startDate,
-      );
-      expect(ad.discoveredAt.toISOString()).toMatch(
-        /^2026-10-05T\d{2}:\d{2}:\d{2}\.000Z$/,
-      );
+      expect(new Date(ad.startDate).toISOString().slice(0, 10)).toBe(ad.startDate);
+      expect(ad.discoveredAt.toISOString()).toMatch(/^2026-10-05T\d{2}:\d{2}:\d{2}\.000Z$/);
       if (ad.status === "active") {
         expect(ad.endDate).toBeNull();
       } else {
         expect(ad.status).toBe("inactive");
         expect(ad.endDate).not.toBeNull();
-        expect(new Date(ad.endDate).toISOString().slice(0, 10)).toBe(
-          ad.endDate,
-        );
+        expect(new Date(ad.endDate).toISOString().slice(0, 10)).toBe(ad.endDate);
         expect(ad.endDate >= ad.startDate).toBe(true);
         expect(ad.endDate <= "2026-10-05").toBe(true);
       }
@@ -110,22 +93,10 @@ describe("deterministic ad world", () => {
       ranksByBrand.set(ad.brandId, ranks);
     }
     expect(ranksByBrand.size).toBe(300);
-    const firstBrandRanks = [...(ranksByBrand.get(1) ?? [])].sort(
-      (a, b) => a - b,
-    );
-    expect(
-      firstBrandRanks.some(
-        (rank, i) => i > 0 && rank > firstBrandRanks[i - 1] + 1,
-      ),
-    ).toBe(true);
-    expect(
-      ads.filter((ad) => ad.brandId === 1 && ad.impressionRank === null).length,
-    ).toBeGreaterThan(1);
-    expect(
-      [...(ranksByBrand.get(2) ?? [])].some((rank) =>
-        ranksByBrand.get(1)?.has(rank),
-      ),
-    ).toBe(true);
+    const firstBrandRanks = [...(ranksByBrand.get(1) ?? [])].sort((a, b) => a - b);
+    expect(firstBrandRanks.some((rank, i) => i > 0 && rank > firstBrandRanks[i - 1] + 1)).toBe(true);
+    expect(ads.filter((ad) => ad.brandId === 1 && ad.impressionRank === null).length).toBeGreaterThan(1);
+    expect([...(ranksByBrand.get(2) ?? [])].some((rank) => ranksByBrand.get(1)?.has(rank))).toBe(true);
   });
 
   it("returns fresh records and nested values, without state leaking across calls", () => {

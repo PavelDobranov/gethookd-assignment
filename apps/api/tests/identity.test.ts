@@ -25,8 +25,7 @@ async function listen(db = connection.db, jwtSecret = secret) {
   listeners.push(server);
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("Expected TCP listener");
+  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   return `http://127.0.0.1:${address.port}`;
 }
 
@@ -38,10 +37,7 @@ beforeAll(async () => {
     await admin.close();
   }
   await initializeDatabase(url.href);
-  const [demo] = await connection.db
-    .select()
-    .from(users)
-    .where(eq(users.username, "demo"));
+  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
   id = demo.id;
   const login = await fetch(`${await listen()}/api/auth/login`, {
     method: "POST",
@@ -56,9 +52,7 @@ beforeAll(async () => {
 afterAll(async () => {
   vi.useRealTimers();
   for (const server of listeners) {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
   await connection.close();
   for (const extra of extras) await extra.close();
@@ -113,23 +107,14 @@ it("accepts login tokens after time advances and invalidates them when the signi
 });
 
 it("rejects missing/malformed headers and never authenticates cookies or query parameters", async () => {
-  for (const authorization of [
-    undefined,
-    "Basic abc",
-    "Bearer",
-    "Bearer abc",
-    `Bearer ${token} extra`,
-  ]) {
+  for (const authorization of [undefined, "Basic abc", "Bearer", "Bearer abc", `Bearer ${token} extra`]) {
     await unauthorized(
-      await fetch(
-        `${origin}/api/auth/me?token=${token}&access_token=${token}`,
-        {
-          headers: {
-            cookie: `token=${token}; access_token=${token}`,
-            ...(authorization ? { authorization } : {}),
-          },
+      await fetch(`${origin}/api/auth/me?token=${token}&access_token=${token}`, {
+        headers: {
+          cookie: `token=${token}; access_token=${token}`,
+          ...(authorization ? { authorization } : {}),
         },
-      ),
+      }),
     );
   }
 });
@@ -141,24 +126,10 @@ it("rejects the token attack matrix and invalid subjects without leaking details
     `${header}.${Buffer.from(JSON.stringify({ sub: randomUUID() })).toString("base64url")}.${signature}`,
     await signToken(id, `${secret}-wrong`),
     new UnsecuredJWT({ sub: id }).encode(),
-    await new SignJWT({ sub: id })
-      .setProtectedHeader({ alg: "HS384" })
-      .sign(key),
+    await new SignJWT({ sub: id }).setProtectedHeader({ alg: "HS384" }).sign(key),
     ...(await Promise.all(
-      [
-        undefined,
-        null,
-        "",
-        123,
-        [],
-        {},
-        "not-a-uuid",
-        "' OR 1=1 --",
-        randomUUID(),
-      ].map((sub) =>
-        new SignJWT(sub === undefined ? {} : { sub })
-          .setProtectedHeader({ alg: "HS256" })
-          .sign(key),
+      [undefined, null, "", 123, [], {}, "not-a-uuid", "' OR 1=1 --", randomUUID()].map((sub) =>
+        new SignJWT(sub === undefined ? {} : { sub }).setProtectedHeader({ alg: "HS256" }).sign(key),
       ),
     )),
     `${header}.${payload}.broken`,
@@ -192,9 +163,7 @@ it("invalidates a valid token when its database subject is deleted", async () =>
 });
 
 it("distinguishes a real unavailable database from invalid credentials and unexpected SQL failures", async () => {
-  const unavailable = createDatabase(
-    "postgresql://private:private@127.0.0.1:1/private",
-  );
+  const unavailable = createDatabase("postgresql://private:private@127.0.0.1:1/private");
   extras.push(unavailable);
   const unavailableOrigin = await listen(unavailable.db);
   const response = await fetch(`${unavailableOrigin}/api/auth/me`, {

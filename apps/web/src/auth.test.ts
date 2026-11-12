@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  clearToken,
-  getIdentity,
-  login,
-  readToken,
-  storeToken,
-  TOKEN_STORAGE_KEY,
-} from "./auth";
+import { clearToken, getIdentity, login, readToken, storeToken, TOKEN_STORAGE_KEY } from "./auth";
 
 const token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature";
 
@@ -93,17 +86,12 @@ describe("auth HTTP boundary", () => {
     { token, user: null },
   ])("rejects invalid login output %j", async (body) => {
     mockResponse(body);
-    await expect(
-      login({ username: "demo", password: "password" }),
-    ).rejects.toMatchObject({ kind: "invalid_response" });
+    await expect(login({ username: "demo", password: "password" })).rejects.toMatchObject({ kind: "invalid_response" });
     expect(sessionStorage.length).toBe(0);
   });
 
   it("sanitizes non-JSON success output", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response("private server details")),
-    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private server details")));
     await expect(getIdentity(token)).rejects.toMatchObject({
       kind: "invalid_response",
       message: "Invalid authentication response.",
@@ -118,37 +106,30 @@ describe("auth HTTP boundary", () => {
     [500, "unavailable"],
     [502, "unavailable"],
     [503, "unavailable"],
-  ])(
-    "classifies HTTP %s as %s without exposing the body or retrying",
-    async (status, kind) => {
-      const http = mockResponse(
-        { error: { message: "private details" }, token },
-        Number(status),
-      );
-      storeToken(token);
-      await expect(getIdentity(token)).rejects.toMatchObject({
-        kind,
-        status,
-        message: expect.not.stringContaining("private"),
-      });
-      expect(http).toHaveBeenCalledTimes(1);
-      // Auth-state transitions belong to the UI, not the HTTP boundary.
-      expect(readToken()).toBe(token);
-    },
-  );
+  ])("classifies HTTP %s as %s without exposing the body or retrying", async (status, kind) => {
+    const http = mockResponse({ error: { message: "private details" }, token }, Number(status));
+    storeToken(token);
+    await expect(getIdentity(token)).rejects.toMatchObject({
+      kind,
+      status,
+      message: expect.not.stringContaining("private"),
+    });
+    expect(http).toHaveBeenCalledTimes(1);
+    // Auth-state transitions belong to the UI, not the HTTP boundary.
+    expect(readToken()).toBe(token);
+  });
 
   it("classifies login 401 separately from service failures", async () => {
     const http = mockResponse({}, 401);
-    await expect(
-      login({ username: "demo", password: "wrong" }),
-    ).rejects.toMatchObject({ kind: "unauthenticated", status: 401 });
+    await expect(login({ username: "demo", password: "wrong" })).rejects.toMatchObject({
+      kind: "unauthenticated",
+      status: 401,
+    });
     expect(http).toHaveBeenCalledTimes(1);
   });
 
   it("sanitizes network failures without retrying or clearing stored tokens", async () => {
-    const http = vi
-      .fn()
-      .mockRejectedValue(new Error(`private details ${token}`));
+    const http = vi.fn().mockRejectedValue(new Error(`private details ${token}`));
     vi.stubGlobal("fetch", http);
     storeToken(token);
     await expect(getIdentity(token)).rejects.toMatchObject({
@@ -193,45 +174,34 @@ describe("tab token storage", () => {
     expect(readToken()).toBeNull();
   });
 
-  it.each([
-    "",
-    "null",
-    "undefined",
-    "{}",
-    "abc",
-    "a.b",
-    "a.b.c.d",
-    "a. .c",
-    '"a.b.c"',
-    "a.b.c\n",
-  ])("discards malformed stored value %j without decoding claims", (value) => {
-    sessionStorage.setItem(TOKEN_STORAGE_KEY, value);
-    expect(readToken()).toBeNull();
-    expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
-  });
+  it.each(["", "null", "undefined", "{}", "abc", "a.b", "a.b.c.d", "a. .c", '"a.b.c"', "a.b.c\n"])(
+    "discards malformed stored value %j without decoding claims",
+    (value) => {
+      sessionStorage.setItem(TOKEN_STORAGE_KEY, value);
+      expect(readToken()).toBeNull();
+      expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+    },
+  );
 
   it("rejects malformed writes without persisting them", () => {
     expect(() => storeToken("not a JWT")).toThrow();
     expect(sessionStorage.length).toBe(0);
   });
 
-  it.each(["getItem", "setItem", "removeItem"] as const)(
-    "reports sanitized storage failure for %s",
-    (method) => {
-      vi.spyOn(Storage.prototype, method).mockImplementation(() => {
-        throw new Error("private browser details");
-      });
-      const operation = {
-        getItem: readToken,
-        setItem: () => storeToken(token),
-        removeItem: clearToken,
-      }[method];
-      expect(operation).toThrow(
-        expect.objectContaining({
-          kind: "storage",
-          message: "Session storage is unavailable.",
-        }),
-      );
-    },
-  );
+  it.each(["getItem", "setItem", "removeItem"] as const)("reports sanitized storage failure for %s", (method) => {
+    vi.spyOn(Storage.prototype, method).mockImplementation(() => {
+      throw new Error("private browser details");
+    });
+    const operation = {
+      getItem: readToken,
+      setItem: () => storeToken(token),
+      removeItem: clearToken,
+    }[method];
+    expect(operation).toThrow(
+      expect.objectContaining({
+        kind: "storage",
+        message: "Session storage is unavailable.",
+      }),
+    );
+  });
 });

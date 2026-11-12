@@ -6,6 +6,7 @@ import { runIngestTick } from "./tick.js";
 process.exitCode = await runIngest({
   open: () => {
     const database = createDatabase(loadConfig().databaseUrl);
+
     return {
       tick: () => runIngestTick(database.db),
       close: database.close,

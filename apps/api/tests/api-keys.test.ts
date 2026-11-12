@@ -32,9 +32,7 @@ beforeEach(async () => {
     .values({ username: "owner", passwordHash: "test-only-hash" })
     .returning({ id: users.id });
   ownerId = owner.id;
-  await db
-    .insert(apiKeys)
-    .values({ userId: ownerId, keyHash: hashApiKey(publicKey) });
+  await db.insert(apiKeys).values({ userId: ownerId, keyHash: hashApiKey(publicKey) });
 });
 
 it("resolves the actual owning user from a hash-only stored key", async () => {
@@ -62,9 +60,7 @@ it.each([undefined, null, "", 42, true, [publicKey], { api_key: publicKey }])(
   "rejects missing, empty and non-scalar input (case %#)",
   async (key) => {
     // Even a stored empty-string digest must not authenticate an empty input.
-    await db
-      .insert(apiKeys)
-      .values({ userId: ownerId, keyHash: hashApiKey("") });
+    await db.insert(apiKeys).values({ userId: ownerId, keyHash: hashApiKey("") });
     expect(await validateApiKey(db, key)).toBeNull();
   },
 );

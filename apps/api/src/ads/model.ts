@@ -48,10 +48,7 @@ export function isCountryCode(value: unknown): value is string {
   return typeof value === "string" && countryCodes.has(value);
 }
 
-type AdTiming = { startDate: string } & (
-  | { status: "active"; endDate: null }
-  | { status: "inactive"; endDate: string }
-);
+type AdTiming = { startDate: string } & ({ status: "active"; endDate: null } | { status: "inactive"; endDate: string });
 
 export type Brand = { id: number; name: string };
 
@@ -69,7 +66,7 @@ export type Ad = AdTiming & {
 
 // Inputs are validated calendar dates. Subtract UTC midnights, not elapsed local days.
 export function daysActive(ad: AdTiming, now: Date = new Date()): number {
-  const endDate =
-    ad.status === "inactive" ? ad.endDate : now.toISOString().slice(0, 10);
+  const endDate = ad.status === "inactive" ? ad.endDate : now.toISOString().slice(0, 10);
+
   return (Date.parse(endDate) - Date.parse(ad.startDate)) / 86_400_000;
 }

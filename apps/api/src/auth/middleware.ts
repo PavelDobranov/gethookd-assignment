@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+
 import type { createAuthService } from "./service.js";
 
 export type AuthenticatedLocals = {
@@ -8,9 +9,7 @@ export type AuthenticatedLocals = {
   };
 };
 
-export function createRequireAuthentication(
-  auth: Pick<ReturnType<typeof createAuthService>, "getUser">,
-) {
+export function createRequireAuthentication(auth: Pick<ReturnType<typeof createAuthService>, "getUser">) {
   return async function requireAuthentication(
     req: Request,
     res: Response<unknown, AuthenticatedLocals>,

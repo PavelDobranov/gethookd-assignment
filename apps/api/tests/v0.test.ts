@@ -27,13 +27,8 @@ beforeAll(async () => {
   await connection.db.delete(ads);
   await connection.db.delete(brands);
   await connection.db.insert(brands).values({ id: 1, name: "Contract Brand" });
-  const [demo] = await connection.db
-    .select()
-    .from(users)
-    .where(eq(users.username, "demo"));
-  await connection.db
-    .insert(apiKeys)
-    .values({ userId: demo.id, keyHash: hashApiKey(key) });
+  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
+  await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
   await connection.db.insert(ads).values({
     id: "contract-ad",
     brandId: 1,
@@ -112,23 +107,18 @@ beforeAll(async () => {
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("Expected TCP listener");
+  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   origin = `http://127.0.0.1:${address.port}`;
 });
 
 afterAll(async () => {
   if (server)
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   await connection.close();
 });
 
 it("serves only the legacy allowlisted fields using a stored key", async () => {
-  const response = await fetch(
-    `${origin}/api/v0/ads?api_key=${key}&q=Serum+glow`,
-  );
+  const response = await fetch(`${origin}/api/v0/ads?api_key=${key}&q=Serum+glow`);
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.json()).toEqual({
@@ -171,16 +161,11 @@ it.each([
   ["q=%5C", ["literal-ad"]],
   ["q=%25_%5C", ["literal-ad"]],
   ["q=%27+OR+1%3D1+--", []],
-])(
-  "applies parameterized literal search and combined filters: %s",
-  async (query, ids) => {
-    const body = await getAds(query);
-    expect(body.total).toBe(ids.length);
-    expect(body.data.map((ad: { id: string }) => ad.id).sort()).toEqual(
-      [...ids].sort(),
-    );
-  },
-);
+])("applies parameterized literal search and combined filters: %s", async (query, ids) => {
+  const body = await getAds(query);
+  expect(body.total).toBe(ids.length);
+  expect(body.data.map((ad: { id: string }) => ad.id).sort()).toEqual([...ids].sort());
+});
 
 it("returns default and clamped offset pages with full totals and date-only descending order", async () => {
   const first = await getAds();
@@ -189,9 +174,7 @@ it("returns default and clamped offset pages with full totals and date-only desc
   expect(first.data).toHaveLength(20);
   const dates = first.data.map((ad: { start_date: string }) => ad.start_date);
   expect(dates).toEqual([...dates].sort().reverse());
-  expect(
-    new Set(first.data.slice(3, 5).map((ad: { id: string }) => ad.id)),
-  ).toEqual(new Set(["pet-ad", "tie-ad"]));
+  expect(new Set(first.data.slice(3, 5).map((ad: { id: string }) => ad.id))).toEqual(new Set(["pet-ad", "tie-ad"]));
   const clamped = await getAds("per_page=101");
   expect(clamped.data).toHaveLength(100);
   const second = await getAds("page=2&per_page=9007199254740991");
@@ -202,10 +185,7 @@ it("returns default and clamped offset pages with full totals and date-only desc
   const filtered = await getAds("q=serum&page=2&per_page=2");
   expect(filtered.page).toBe(2);
   expect(filtered.total).toBe(4);
-  expect(filtered.data.map((ad: { id: string }) => ad.id).sort()).toEqual([
-    "pet-ad",
-    "tie-ad",
-  ]);
+  expect(filtered.data.map((ad: { id: string }) => ad.id).sort()).toEqual(["pet-ad", "tie-ad"]);
   expect(await getAds("q=serum&page=3&per_page=2")).toEqual({
     data: [],
     page: 3,
@@ -214,19 +194,14 @@ it("returns default and clamped offset pages with full totals and date-only desc
   expect((await getAds("page=0002&per_page=003")).data).toHaveLength(3);
 });
 
-it.each(niches)(
-  "accepts slug/display names without losing $name in the response",
-  async ({ slug, name }) => {
-    for (const niche of [slug, name, slug.toUpperCase(), name.toUpperCase()]) {
-      const body = await getAds(
-        new URLSearchParams({ q: "Catalog", niche }).toString(),
-      );
-      expect(body.total).toBe(1);
-      expect(body.data).toHaveLength(1);
-      expect(body.data[0].niche).toBe(name);
-    }
-  },
-);
+it.each(niches)("accepts slug/display names without losing $name in the response", async ({ slug, name }) => {
+  for (const niche of [slug, name, slug.toUpperCase(), name.toUpperCase()]) {
+    const body = await getAds(new URLSearchParams({ q: "Catalog", niche }).toString());
+    expect(body.total).toBe(1);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].niche).toBe(name);
+  }
+});
 
 it.each([
   "niche=",
@@ -243,36 +218,24 @@ it.each([
   "status=Active",
   "status=+active",
   "status=unknown",
-])(
-  "ignores invalid filter while retaining valid combined filters: %s",
-  async (invalid) => {
-    const valid = invalid.startsWith("niche")
-      ? "format=video&status=inactive"
-      : invalid.startsWith("format")
-        ? "niche=skincare&status=inactive"
-        : "niche=skincare&format=video";
-    const body = await getAds(`q=serum&${valid}&${invalid}`);
-    expect(body.total).toBe(1);
-    expect(body.data.map((ad: { id: string }) => ad.id)).toEqual([
-      "contract-ad",
-    ]);
-  },
-);
+])("ignores invalid filter while retaining valid combined filters: %s", async (invalid) => {
+  const valid = invalid.startsWith("niche")
+    ? "format=video&status=inactive"
+    : invalid.startsWith("format")
+      ? "niche=skincare&status=inactive"
+      : "niche=skincare&format=video";
+  const body = await getAds(`q=serum&${valid}&${invalid}`);
+  expect(body.total).toBe(1);
+  expect(body.data.map((ad: { id: string }) => ad.id)).toEqual(["contract-ad"]);
+});
 
 it("ignores exact-name mismatches, repeated unknowns, sort and bracketed names", async () => {
   const body = await getAds(
     "q=serum&niche[x]=bad&niche[x]=worse&sort=asc&sort=desc&other=1&other=2&Q=missing&Q=absent&api_key[]=bad&page[]=bad&per_page[x]=bad",
   );
   expect(body.total).toBe(4);
-  expect(body.data.map((ad: { id: string }) => ad.id).sort()).toEqual([
-    "body-ad",
-    "contract-ad",
-    "pet-ad",
-    "tie-ad",
-  ]);
-  expect((await getAds("q=serum&niche=skincare&niche[x]=fitness")).total).toBe(
-    1,
-  );
+  expect(body.data.map((ad: { id: string }) => ad.id).sort()).toEqual(["body-ad", "contract-ad", "pet-ad", "tie-ad"]);
+  expect((await getAds("q=serum&niche=skincare&niche[x]=fitness")).total).toBe(1);
   expect((await getAds("q=")).total).toBe(137);
   expect((await getAds("q=+serum+")).total).toBe(0);
 });
@@ -281,11 +244,9 @@ it("derives active days from the actual UTC day and keeps inactive days fixed", 
   const today = new Date().toISOString().slice(0, 10);
   const actual = await getAds("q=Quiet+room");
   const after = new Date().toISOString().slice(0, 10);
-  expect(
-    [today, after].map(
-      (date) => (Date.parse(date) - Date.parse("2025-12-02")) / 86400000,
-    ),
-  ).toContain(actual.data[0].days_active);
+  expect([today, after].map((date) => (Date.parse(date) - Date.parse("2025-12-02")) / 86400000)).toContain(
+    actual.data[0].days_active,
+  );
   vi.useFakeTimers({ toFake: ["Date"] });
   try {
     vi.setSystemTime(new Date("2026-10-05T23:59:59.999Z"));
@@ -342,9 +303,7 @@ for (const name of ["page", "per_page"]) {
     "9007199254740993",
     "99999999999999999999999999999999999999999999",
   ])(`rejects invalid ${name}=%j over HTTP`, async (value) => {
-    await expectInvalid(
-      new URLSearchParams({ api_key: key, [name]: value }).toString(),
-    );
+    await expectInvalid(new URLSearchParams({ api_key: key, [name]: value }).toString());
   });
 }
 
@@ -397,23 +356,13 @@ it.each(["q", "niche", "format", "status", "page", "per_page", "api_key"])(
     const encodedName = `%${name.charCodeAt(0).toString(16)}${name.slice(1)}`;
     const credential = name === "api_key" ? "" : `api_key=${key}&`;
     const value = name === "api_key" ? key : "1";
-    await expectInvalid(
-      `${credential}${name}=${value}&${encodedName}=${value}`,
-    );
+    await expectInvalid(`${credential}${name}=${value}&${encodedName}=${value}`);
   },
 );
 
 it("ignores all bracketed and case-mismatched names, even when repeated", async () => {
   const query = new URLSearchParams({ q: "serum" });
-  for (const name of [
-    "q",
-    "niche",
-    "format",
-    "status",
-    "page",
-    "per_page",
-    "api_key",
-  ]) {
+  for (const name of ["q", "niche", "format", "status", "page", "per_page", "api_key"]) {
     for (const unknown of [`${name}[]`, `${name}[x]`, name.toUpperCase()]) {
       query.append(unknown, "bad");
       query.append(unknown, "worse");
@@ -422,12 +371,7 @@ it("ignores all bracketed and case-mismatched names, even when repeated", async 
   const body = await getAds(query.toString());
   expect(body.page).toBe(1);
   expect(body.total).toBe(4);
-  expect(body.data.map((ad: { id: string }) => ad.id).sort()).toEqual([
-    "body-ad",
-    "contract-ad",
-    "pet-ad",
-    "tie-ad",
-  ]);
+  expect(body.data.map((ad: { id: string }) => ad.id).sort()).toEqual(["body-ad", "contract-ad", "pet-ad", "tie-ad"]);
 });
 
 it("does not allow a genuine portal JWT to substitute for a stored query key", async () => {
@@ -441,10 +385,7 @@ it("does not allow a genuine portal JWT to substitute for a stored query key", a
   const headers = { authorization: `Bearer ${token}` };
   await expectInvalid("", headers);
   await expectInvalid("api_key=wrong", headers);
-  await expectInvalid(
-    new URLSearchParams({ api_key: token }).toString(),
-    headers,
-  );
+  await expectInvalid(new URLSearchParams({ api_key: token }).toString(), headers);
   const valid = await fetch(`${origin}/api/v0/ads?api_key=${key}&q=missing`, {
     headers: { authorization: "Bearer invalid-portal-token" },
   });
@@ -459,10 +400,7 @@ it("validates stored-key state on every request rather than caching credentials"
     q: "missing",
   }).toString();
   await expectInvalid(query);
-  const [demo] = await connection.db
-    .select()
-    .from(users)
-    .where(eq(users.username, "demo"));
+  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
   const keyHash = hashApiKey(transientKey);
   try {
     await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash });
@@ -480,15 +418,11 @@ it.each(["api_keys", "ads", "brands"])(
   async (table) => {
     // Break auth, filtered count, then row lookup in this test-owned database only.
     const unavailable = `${table}_unavailable`;
-    await connection.db.execute(
-      sql`ALTER TABLE ${sql.identifier(table)} RENAME TO ${sql.identifier(unavailable)}`,
-    );
+    await connection.db.execute(sql`ALTER TABLE ${sql.identifier(table)} RENAME TO ${sql.identifier(unavailable)}`);
     try {
       await expectInvalid(`api_key=${key}`);
     } finally {
-      await connection.db.execute(
-        sql`ALTER TABLE ${sql.identifier(unavailable)} RENAME TO ${sql.identifier(table)}`,
-      );
+      await connection.db.execute(sql`ALTER TABLE ${sql.identifier(unavailable)} RENAME TO ${sql.identifier(table)}`);
     }
     expect((await getAds("q=missing")).total).toBe(0);
   },

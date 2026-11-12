@@ -6,12 +6,7 @@ import type { ErrorRequestHandler } from "express";
 //  - 503 (database unavailable)
 //  - 500 (any other failure)
 // without exposing internal error details
-export const handleErrors: ErrorRequestHandler = (
-  error: unknown,
-  _req,
-  res,
-  _next,
-) => {
+export const handleErrors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
   if (isInvalidRequestBody(error)) {
     res.status(400).json({
       error: { code: "INVALID_REQUEST", message: "Invalid JSON request." },
@@ -63,8 +58,7 @@ function isDatabaseUnavailable(error: unknown): boolean {
   // Node may aggregate failed connection attempts to multiple addresses.
   return (
     isDatabaseUnavailableCause(cause) ||
-    (cause instanceof AggregateError &&
-      cause.errors.some(isDatabaseUnavailableCause))
+    (cause instanceof AggregateError && cause.errors.some(isDatabaseUnavailableCause))
   );
 }
 
@@ -75,8 +69,7 @@ function isDatabaseUnavailableCause(error: unknown): boolean {
   // The query deadline can race PostgreSQL's statement_timeout (57014).
   if (!("code" in error)) {
     return (
-      error.message === "Query read timeout" ||
-      error.message === "Connection terminated due to connection timeout"
+      error.message === "Query read timeout" || error.message === "Connection terminated due to connection timeout"
     );
   }
 

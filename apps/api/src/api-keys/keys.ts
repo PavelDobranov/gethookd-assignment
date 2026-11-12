@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
+
 import type { createDatabase } from "../db/client.js";
 import { apiKeys } from "../db/schema.js";
 

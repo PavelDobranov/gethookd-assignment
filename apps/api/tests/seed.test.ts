@@ -3,15 +3,7 @@ import { promisify } from "node:util";
 import { eq, sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  expect,
-  inject,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
 import { hashApiKey, validateApiKey } from "../src/api-keys/index.js";
 import { hashPassword, verifyPassword } from "../src/auth/password.js";
 import { createDatabase } from "../src/db/client.js";
@@ -54,46 +46,28 @@ it("initializes an empty database then preserves changed credentials and unrelat
     });
   try {
     await initialize();
-    expect((await connection.db.select({ id: ads.id }).from(ads)).length).toBe(
-      20_000,
-    );
+    expect((await connection.db.select({ id: ads.id }).from(ads)).length).toBe(20_000);
     expect((await connection.db.select().from(brands)).length).toBe(300);
     const [demo] = await connection.db.select().from(users);
-    expect(
-      await validateApiKey(connection.db, "gethookd-public-demo-api-key-m2"),
-    ).toEqual({ userId: demo.id });
+    expect(await validateApiKey(connection.db, "gethookd-public-demo-api-key-m2")).toEqual({ userId: demo.id });
     expect(demo.username).toBe("demo");
     expect(await verifyPassword("demo-password", demo.passwordHash)).toBe(true);
     await connection.db
       .update(users)
       .set({ passwordHash: await hashPassword("changed-password") })
       .where(eq(users.id, demo.id));
-    await connection.db
-      .insert(users)
-      .values({ username: "unrelated", passwordHash: "test-hash" });
-    const before = await connection.db
-      .select()
-      .from(users)
-      .orderBy(users.username);
+    await connection.db.insert(users).values({ username: "unrelated", passwordHash: "test-hash" });
+    const before = await connection.db.select().from(users).orderBy(users.username);
     await initialize();
-    const after = await connection.db
-      .select()
-      .from(users)
-      .orderBy(users.username);
+    const after = await connection.db.select().from(users).orderBy(users.username);
     expect(JSON.stringify(after) === JSON.stringify(before)).toBe(true);
     expect(
-      (
-        await connection.db.execute(
-          sql`SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id`,
-        )
-      ).rows,
+      (await connection.db.execute(sql`SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id`)).rows,
     ).toEqual(
-      readMigrationFiles({ migrationsFolder: "drizzle" }).map(
-        ({ hash, folderMillis }) => ({
-          hash,
-          created_at: String(folderMillis),
-        }),
-      ),
+      readMigrationFiles({ migrationsFolder: "drizzle" }).map(({ hash, folderMillis }) => ({
+        hash,
+        created_at: String(folderMillis),
+      })),
     );
   } finally {
     await connection.close();
@@ -171,9 +145,7 @@ it("rolls back the entire command seed and sanitizes a late persistence failure"
 }, 20000);
 
 it("reports invalid configuration without exposing its value", async () => {
-  await expect(
-    runSeed("invalid-private-connection-value"),
-  ).rejects.toMatchObject({
+  await expect(runSeed("invalid-private-connection-value")).rejects.toMatchObject({
     code: 1,
     killed: false,
     stderr: expect.not.stringContaining("invalid-private-connection-value"),
@@ -205,13 +177,8 @@ it("preserves the exact existing demo ID and hash on repeat seeding", async () =
 it("preserves deliberately changed demo credentials and unrelated users", async () => {
   await seedDemoUser(db);
   const changedHash = await hashPassword("deliberately-changed-password");
-  await db
-    .update(users)
-    .set({ passwordHash: changedHash })
-    .where(eq(users.username, "demo"));
-  await db
-    .insert(users)
-    .values({ username: "unrelated", passwordHash: "unrelated-test-hash" });
+  await db.update(users).set({ passwordHash: changedHash }).where(eq(users.username, "demo"));
+  await db.insert(users).values({ username: "unrelated", passwordHash: "unrelated-test-hash" });
   const before = await db.select().from(users).orderBy(users.username);
   await seedDemoUser(db);
   const after = await db.select().from(users).orderBy(users.username);
@@ -219,21 +186,12 @@ it("preserves deliberately changed demo credentials and unrelated users", async 
   expect(JSON.stringify(after) === JSON.stringify(before)).toBe(true);
   const demo = after.find((user) => user.username === "demo");
   expect(demo).toBeDefined();
-  expect(
-    await verifyPassword(
-      "deliberately-changed-password",
-      demo?.passwordHash ?? "",
-    ),
-  ).toBe(true);
-  expect(await verifyPassword("demo-password", demo?.passwordHash ?? "")).toBe(
-    false,
-  );
+  expect(await verifyPassword("deliberately-changed-password", demo?.passwordHash ?? "")).toBe(true);
+  expect(await verifyPassword("demo-password", demo?.passwordHash ?? "")).toBe(false);
 });
 
 it("seeds the complete world and a hash-only key owned by the existing demo user", async () => {
-  await db
-    .insert(users)
-    .values({ username: "demo", passwordHash: "existing-hash" });
+  await db.insert(users).values({ username: "demo", passwordHash: "existing-hash" });
   const [demo] = await db.select().from(users);
   const batchTimings: number[] = [];
   const batchParameters: unknown[][] = [];
@@ -246,9 +204,7 @@ it("seeds the complete world and a hash-only key owned by the existing demo user
         const result = Reflect.apply(target, receiver, args);
         if (args[0]?.text?.startsWith('insert into "ads"')) {
           batchParameters.push(args[1]);
-          return result.finally(() =>
-            batchTimings.push(performance.now() - started),
-          );
+          return result.finally(() => batchTimings.push(performance.now() - started));
         }
         return result;
       },
@@ -282,9 +238,7 @@ it("seeds the complete world and a hash-only key owned by the existing demo user
       keyHash: hashApiKey("gethookd-public-demo-api-key-m2"),
     },
   ]);
-  expect(
-    JSON.stringify(await db.select().from(users)) === JSON.stringify([demo]),
-  ).toBe(true);
+  expect(JSON.stringify(await db.select().from(users)) === JSON.stringify([demo])).toBe(true);
 });
 
 it("preserves changed world rows and keys while restoring missing fixture IDs on repeat seed", async () => {
@@ -292,32 +246,20 @@ it("preserves changed world rows and keys while restoring missing fixture IDs on
   const fixtures = generateFixtures();
   const first = fixtures.ads[0];
   const missing = fixtures.ads[1];
-  await db
-    .update(brands)
-    .set({ name: "Changed brand" })
-    .where(eq(brands.id, first.brandId));
-  await db
-    .update(ads)
-    .set({ headline: "Changed headline", impressionRank: 999 })
-    .where(eq(ads.id, first.id));
+  await db.update(brands).set({ name: "Changed brand" }).where(eq(brands.id, first.brandId));
+  await db.update(ads).set({ headline: "Changed headline", impressionRank: 999 }).where(eq(ads.id, first.id));
   await db.delete(ads).where(eq(ads.id, missing.id));
   await db.delete(ads).where(eq(ads.brandId, 300));
   await db.delete(brands).where(eq(brands.id, 300));
   const [changed] = await db.select().from(ads).where(eq(ads.id, first.id));
   const keysBefore = await db.select().from(apiKeys);
   await seedDatabase(db);
-  expect(await db.select().from(ads).where(eq(ads.id, first.id))).toEqual([
-    changed,
+  expect(await db.select().from(ads).where(eq(ads.id, first.id))).toEqual([changed]);
+  expect(await db.select().from(ads).where(eq(ads.id, missing.id))).toEqual([missing]);
+  expect(await db.select().from(brands).where(eq(brands.id, first.brandId))).toEqual([
+    { id: first.brandId, name: "Changed brand" },
   ]);
-  expect(await db.select().from(ads).where(eq(ads.id, missing.id))).toEqual([
-    missing,
-  ]);
-  expect(
-    await db.select().from(brands).where(eq(brands.id, first.brandId)),
-  ).toEqual([{ id: first.brandId, name: "Changed brand" }]);
-  expect(await db.select().from(brands).where(eq(brands.id, 300))).toEqual([
-    fixtures.brands[299],
-  ]);
+  expect(await db.select().from(brands).where(eq(brands.id, 300))).toEqual([fixtures.brands[299]]);
   expect(await db.select().from(apiKeys)).toEqual(keysBefore);
   expect((await db.select().from(ads)).length).toBe(20_000);
 });
@@ -341,8 +283,7 @@ it("round-trips a partial batch with quoted Unicode text, arrays, nulls and offs
 it("repairs an occupied missing-fixture rank above both existing and full-fixture maxima", async () => {
   const fixtures = generateFixtures();
   const ranked = fixtures.ads.find((ad) => ad.impressionRank !== null);
-  if (!ranked || ranked.impressionRank === null)
-    throw new Error("Expected ranked fixture");
+  if (!ranked || ranked.impressionRank === null) throw new Error("Expected ranked fixture");
   const occupied = { ...ranked, id: "ingest-shaped-ad" };
   const brandFixtures = {
     brands: fixtures.brands.filter((brand) => brand.id === ranked.brandId),
@@ -353,18 +294,12 @@ it("repairs an occupied missing-fixture rank above both existing and full-fixtur
   await db.transaction((tx) => seedWorld(tx, brandFixtures));
   const [repaired] = await db.select().from(ads).where(eq(ads.id, ranked.id));
   const maximum = Math.max(
-    ...fixtures.ads
-      .filter((ad) => ad.brandId === ranked.brandId)
-      .map((ad) => ad.impressionRank ?? 0),
+    ...fixtures.ads.filter((ad) => ad.brandId === ranked.brandId).map((ad) => ad.impressionRank ?? 0),
   );
   expect(repaired.impressionRank).toBe(maximum + 1);
-  expect(await db.select().from(ads).where(eq(ads.id, occupied.id))).toEqual([
-    occupied,
-  ]);
+  expect(await db.select().from(ads).where(eq(ads.id, occupied.id))).toEqual([occupied]);
   await db.transaction((tx) => seedWorld(tx, brandFixtures));
-  expect(await db.select().from(ads).where(eq(ads.id, ranked.id))).toEqual([
-    repaired,
-  ]);
+  expect(await db.select().from(ads).where(eq(ads.id, ranked.id))).toEqual([repaired]);
 });
 
 it.each([
@@ -373,15 +308,10 @@ it.each([
   { countries: ["US", "XX"] },
   { countries: ["us"] },
   { countries: [42] },
-])(
-  "rejects invalid country arrays before world persistence (case %#)",
-  async ({ countries }) => {
-    const fixtures = generateFixtures();
-    Object.assign(fixtures.ads[0], { countries });
-    await expect(
-      db.transaction((tx) => seedWorld(tx, fixtures)),
-    ).rejects.toThrow("Invalid fixture countries.");
-    expect(await db.select().from(brands)).toEqual([]);
-    expect(await db.select().from(ads)).toEqual([]);
-  },
-);
+])("rejects invalid country arrays before world persistence (case %#)", async ({ countries }) => {
+  const fixtures = generateFixtures();
+  Object.assign(fixtures.ads[0], { countries });
+  await expect(db.transaction((tx) => seedWorld(tx, fixtures))).rejects.toThrow("Invalid fixture countries.");
+  expect(await db.select().from(brands)).toEqual([]);
+  expect(await db.select().from(ads)).toEqual([]);
+});

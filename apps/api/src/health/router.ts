@@ -8,12 +8,11 @@ type HealthRouterDependencies = {
   db: ReturnType<typeof createDatabase>["db"];
 };
 
-function createHealthHandler(
-  db: HealthRouterDependencies["db"],
-): RequestHandler {
+function createHealthHandler(db: HealthRouterDependencies["db"]): RequestHandler {
   return async function handleHealth(_req, res) {
     try {
       await db.execute(sql`SELECT 1`);
+
       res.json({ status: "ok" });
     } catch {
       res.status(503).json({

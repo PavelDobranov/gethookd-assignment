@@ -9,9 +9,7 @@ export async function initializeDatabase(databaseUrl: string) {
   let stage = "migration";
   try {
     await migrate(db, {
-      migrationsFolder: fileURLToPath(
-        new URL("../../drizzle/", import.meta.url),
-      ),
+      migrationsFolder: fileURLToPath(new URL("../../drizzle/", import.meta.url)),
     });
     stage = "seed";
     await seedDatabase(db);
@@ -22,17 +20,12 @@ export async function initializeDatabase(databaseUrl: string) {
   }
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     await initializeDatabase(loadConfig().databaseUrl);
     console.info("Database initialization completed.");
   } catch {
-    console.error(
-      "Database initialization failed. Check configuration, database readiness and committed migrations.",
-    );
+    console.error("Database initialization failed. Check configuration, database readiness and committed migrations.");
     process.exitCode = 1;
   }
 }

@@ -1,19 +1,6 @@
-import {
-  type FormEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import {
-  AuthError,
-  clearToken,
-  getIdentity,
-  login,
-  readToken,
-  storeToken,
-  type User,
-} from "./auth";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+
+import { AuthError, clearToken, getIdentity, login, readToken, storeToken, type User } from "./auth";
 import "./styles.css";
 
 export default function App() {
@@ -48,9 +35,7 @@ export default function App() {
         try {
           clearToken();
         } catch {
-          setError(
-            "Session storage is unavailable. Close this tab to end the session.",
-          );
+          setError("Session storage is unavailable. Close this tab to end the session.");
         }
       } else if (failure instanceof AuthError && failure.kind === "storage") {
         history.replaceState(null, "", "/login");
@@ -124,9 +109,7 @@ export default function App() {
       clearToken();
       setError("");
     } catch {
-      setError(
-        "Session storage is unavailable. Close this tab to end the session.",
-      );
+      setError("Session storage is unavailable. Close this tab to end the session.");
     }
   }
 
@@ -166,14 +149,7 @@ export default function App() {
           <h1>GetHookd Developer Portal</h1>
           <form onSubmit={submit} aria-busy={busy}>
             <label htmlFor="username">Username</label>
-            <input
-              id="username"
-              name="username"
-              autoComplete="username"
-              required
-              maxLength={100}
-              disabled={busy}
-            />
+            <input id="username" name="username" autoComplete="username" required maxLength={100} disabled={busy} />
             <label htmlFor="password">Password</label>
             <input
               id="password"

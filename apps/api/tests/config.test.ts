@@ -25,9 +25,7 @@ describe("server configuration", () => {
     expect(config.postgresUser).toBe("gethookd");
     expect(config.postgresPassword).toBe("gethookd");
     expect(config.postgresDb).toBe("gethookd");
-    expect(config.databaseUrl).toBe(
-      "postgresql://gethookd:gethookd@localhost:5432/gethookd",
-    );
+    expect(config.databaseUrl).toBe("postgresql://gethookd:gethookd@localhost:5432/gethookd");
     expect(Buffer.byteLength(config.jwtSecret)).toBeGreaterThanOrEqual(32);
   });
 
@@ -41,25 +39,19 @@ describe("server configuration", () => {
         POSTGRES_DB: "db/#?",
       },
     });
-    expect(config.databaseUrl).toBe(
-      "postgresql://u%40%3A%2F:p%3F%23%25%20%2F@db:5432/db%2F%23%3F",
-    );
+    expect(config.databaseUrl).toBe("postgresql://u%40%3A%2F:p%3F%23%25%20%2F@db:5432/db%2F%23%3F");
   });
 
-  it.each(["host", "container"] as const)(
-    "preserves an explicit URL in %s context",
-    (context) => {
-      const databaseUrl =
-        "postgres://custom:password@localhost:9876/other?sslmode=require";
-      expect(
-        loadConfig({
-          envFile: null,
-          context,
-          env: { DATABASE_URL: databaseUrl },
-        }).databaseUrl,
-      ).toBe(databaseUrl);
-    },
-  );
+  it.each(["host", "container"] as const)("preserves an explicit URL in %s context", (context) => {
+    const databaseUrl = "postgres://custom:password@localhost:9876/other?sslmode=require";
+    expect(
+      loadConfig({
+        envFile: null,
+        context,
+        env: { DATABASE_URL: databaseUrl },
+      }).databaseUrl,
+    ).toBe(databaseUrl);
+  });
 
   it("loads dotenv values without mutating process.env; exports win", () => {
     const path = envFile(
@@ -78,13 +70,10 @@ describe("server configuration", () => {
   });
 
   it("honors an explicit URL from dotenv over derived credentials", () => {
-    const path = envFile(
-      "DATABASE_URL=postgresql://file:password@remote:5432/file-db\n",
+    const path = envFile("DATABASE_URL=postgresql://file:password@remote:5432/file-db\n");
+    expect(loadConfig({ envFile: path, env: { POSTGRES_USER: "exported" } }).databaseUrl).toBe(
+      "postgresql://file:password@remote:5432/file-db",
     );
-    expect(
-      loadConfig({ envFile: path, env: { POSTGRES_USER: "exported" } })
-        .databaseUrl,
-    ).toBe("postgresql://file:password@remote:5432/file-db");
     expect(
       loadConfig({
         envFile: path,
@@ -95,26 +84,17 @@ describe("server configuration", () => {
 
   it("tolerates a missing optional env file, but not an unreadable one", () => {
     const path = envFile("");
-    expect(loadConfig({ env: {}, envFile: `${path}.absent` }).postgresDb).toBe(
-      "gethookd",
-    );
-    expect(() => loadConfig({ env: {}, envFile: join(path, "child") })).toThrow(
-      "Unable to read root .env",
-    );
+    expect(loadConfig({ env: {}, envFile: `${path}.absent` }).postgresDb).toBe("gethookd");
+    expect(() => loadConfig({ env: {}, envFile: join(path, "child") })).toThrow("Unable to read root .env");
   });
 
-  it.each([
-    "POSTGRES_USER",
-    "POSTGRES_PASSWORD",
-    "POSTGRES_DB",
-    "DATABASE_URL",
-    "JWT_SECRET",
-  ])("rejects explicitly empty %s, including exported overrides", (key) => {
-    const path = envFile(`${key}=valid-file-value\n`);
-    expect(() => loadConfig({ envFile: path, env: { [key]: "" } })).toThrow(
-      `Invalid ${key}`,
-    );
-  });
+  it.each(["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "DATABASE_URL", "JWT_SECRET"])(
+    "rejects explicitly empty %s, including exported overrides",
+    (key) => {
+      const path = envFile(`${key}=valid-file-value\n`);
+      expect(() => loadConfig({ envFile: path, env: { [key]: "" } })).toThrow(`Invalid ${key}`);
+    },
+  );
 
   it.each([
     ["POSTGRES_USER", " \t"],
@@ -128,8 +108,6 @@ describe("server configuration", () => {
     ["DATABASE_URL", "postgres://remote/db%ZZ"],
     ["DATABASE_URL", " postgres://remote/db"],
   ])("rejects malformed %s without disclosing its value", (key, value) => {
-    expect(() => loadConfig({ envFile: null, env: { [key]: value } })).toThrow(
-      new Error(`Invalid ${key}`),
-    );
+    expect(() => loadConfig({ envFile: null, env: { [key]: value } })).toThrow(new Error(`Invalid ${key}`));
   });
 });

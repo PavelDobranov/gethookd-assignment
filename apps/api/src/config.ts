@@ -10,8 +10,7 @@ type ConfigOptions = {
 };
 
 // Public local-development placeholder, never a production signing secret.
-const developmentJwtSecret =
-  "gethookd-public-development-secret-do-not-use-in-production";
+const developmentJwtSecret = "gethookd-public-development-secret-do-not-use-in-production";
 
 export function loadConfig({
   env = process.env,
@@ -23,9 +22,7 @@ export function loadConfig({
     try {
       Object.assign(values, parse(readFileSync(envFile)));
     } catch (error) {
-      if (
-        !(error instanceof Error && "code" in error && error.code === "ENOENT")
-      ) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw new Error("Unable to read root .env");
       }
     }

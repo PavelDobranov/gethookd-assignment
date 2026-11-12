@@ -34,9 +34,7 @@ async function submitLogin() {
 it("offers an accessible login without a token or protected content", () => {
   render(<App />);
   expect(screen.getByLabelText("Username")).toBeDefined();
-  expect(screen.getByLabelText("Password").getAttribute("type")).toBe(
-    "password",
-  );
+  expect(screen.getByLabelText("Password").getAttribute("type")).toBe("password");
   expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
   expect(fetchMock).not.toHaveBeenCalled();
 });
@@ -75,19 +73,13 @@ it("submits by keyboard, verifies identity, stores only JWT and logs out", async
 });
 
 it("shows a generic credential error and persists nothing on 401", async () => {
-  fetchMock.mockResolvedValueOnce(
-    Response.json({ error: "private detail" }, { status: 401 }),
-  );
+  fetchMock.mockResolvedValueOnce(Response.json({ error: "private detail" }, { status: 401 }));
   render(<App />);
   await submitLogin();
-  expect((await screen.findByRole("alert")).textContent).toMatch(
-    /username or password/i,
-  );
+  expect((await screen.findByRole("alert")).textContent).toMatch(/username or password/i);
   expect(screen.queryByText("private detail")).toBeNull();
   expect(sessionStorage.length).toBe(0);
-  expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe(
-    "",
-  );
+  expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
 });
 
 it("disables duplicate submissions while login is pending", async () => {
@@ -104,9 +96,7 @@ it("disables duplicate submissions while login is pending", async () => {
   expect(screen.queryByText(user.username)).toBeNull();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   resolve(Response.json({}, { status: 503 }));
-  expect((await screen.findByRole("alert")).textContent).toMatch(
-    /unavailable/i,
-  );
+  expect((await screen.findByRole("alert")).textContent).toMatch(/unavailable/i);
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(sessionStorage.length).toBe(0);
 });
@@ -140,29 +130,21 @@ it("clears rejected restored tokens and returns to login", async () => {
   expect(screen.queryByText(user.username)).toBeNull();
 });
 
-it.each(["network", "server"])(
-  "blocks protected content on %s failure without retrying",
-  async (kind) => {
-    sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
-    if (kind === "network")
-      fetchMock.mockRejectedValueOnce(new TypeError("private details"));
-    else fetchMock.mockResolvedValueOnce(Response.json({}, { status: 503 }));
-    render(<App />);
-    expect((await screen.findByRole("alert")).textContent).toMatch(
-      /unavailable/i,
-    );
-    expect(screen.queryByText(user.username)).toBeNull();
-    expect(screen.queryByLabelText("Username")).toBeNull();
-    expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe(token);
-    await act(async () => {});
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Log out" }));
-    expect(screen.getByLabelText("Username")).toBeDefined();
-    expect(sessionStorage.length).toBe(0);
-  },
-);
+it.each(["network", "server"])("blocks protected content on %s failure without retrying", async (kind) => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  if (kind === "network") fetchMock.mockRejectedValueOnce(new TypeError("private details"));
+  else fetchMock.mockResolvedValueOnce(Response.json({}, { status: 503 }));
+  render(<App />);
+  expect((await screen.findByRole("alert")).textContent).toMatch(/unavailable/i);
+  expect(screen.queryByText(user.username)).toBeNull();
+  expect(screen.queryByLabelText("Username")).toBeNull();
+  expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe(token);
+  await act(async () => {});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await userEvent.setup().click(screen.getByRole("button", { name: "Log out" }));
+  expect(screen.getByLabelText("Username")).toBeDefined();
+  expect(sessionStorage.length).toBe(0);
+});
 
 it("does not persist a login token when identity verification rejects it", async () => {
   fetchMock
@@ -180,23 +162,18 @@ it("keeps the login available with a useful error if storage is blocked", async 
     throw new Error("blocked");
   });
   render(<App />);
-  expect((await screen.findByRole("alert")).textContent).toMatch(
-    /storage.*unavailable/i,
-  );
+  expect((await screen.findByRole("alert")).textContent).toMatch(/storage.*unavailable/i);
   expect(screen.getByLabelText("Username")).toBeDefined();
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-it.each(["/", "/login", "/portal"])(
-  "routes unauthenticated %s visits to login",
-  (path) => {
-    history.replaceState(null, "", path);
-    render(<App />);
-    expect(location.pathname).toBe("/login");
-    expect(screen.getByLabelText("Username")).toBeDefined();
-    expect(fetchMock).not.toHaveBeenCalled();
-  },
-);
+it.each(["/", "/login", "/portal"])("routes unauthenticated %s visits to login", (path) => {
+  history.replaceState(null, "", path);
+  render(<App />);
+  expect(location.pathname).toBe("/login");
+  expect(screen.getByLabelText("Username")).toBeDefined();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
 
 it("hides the previous identity and revalidates on Back, clearing a 401", async () => {
   sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
@@ -229,25 +206,19 @@ it("hides the previous identity and revalidates on Back, clearing a 401", async 
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
-it.each(["network", "server"])(
-  "recovers from %s only on manual retry",
-  async (kind) => {
-    sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
-    if (kind === "network")
-      fetchMock.mockRejectedValueOnce(new TypeError("offline"));
-    else fetchMock.mockResolvedValueOnce(Response.json({}, { status: 503 }));
-    render(<App />);
-    await screen.findByRole("alert");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    fetchMock.mockResolvedValueOnce(Response.json({ user }));
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText(user.username)).toBeDefined();
-    expect(location.pathname).toBe("/portal");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  },
-);
+it.each(["network", "server"])("recovers from %s only on manual retry", async (kind) => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  if (kind === "network") fetchMock.mockRejectedValueOnce(new TypeError("offline"));
+  else fetchMock.mockResolvedValueOnce(Response.json({}, { status: 503 }));
+  render(<App />);
+  await screen.findByRole("alert");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fetchMock.mockResolvedValueOnce(Response.json({ user }));
+  await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText(user.username)).toBeDefined();
+  expect(location.pathname).toBe("/portal");
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
 
 it("does not restore a late identity after navigation and logout", async () => {
   sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
@@ -263,9 +234,7 @@ it("does not restore a late identity after navigation and logout", async () => {
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
   await screen.findByRole("alert");
-  await userEvent
-    .setup()
-    .click(screen.getByRole("button", { name: "Log out" }));
+  await userEvent.setup().click(screen.getByRole("button", { name: "Log out" }));
   await act(async () => {
     resolve(Response.json({ user }));
   });
@@ -301,9 +270,7 @@ it("revalidates a back-forward cache restoration", async () => {
   await screen.findByText(user.username);
   fetchMock.mockResolvedValueOnce(Response.json({}, { status: 401 }));
   act(() => {
-    window.dispatchEvent(
-      new PageTransitionEvent("pageshow", { persisted: true }),
-    );
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
   });
   expect(screen.queryByText(user.username)).toBeNull();
   await screen.findByLabelText("Username");

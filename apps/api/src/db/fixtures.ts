@@ -10,6 +10,7 @@ const fixtureCountries = ["US", "GB", "CA", "AU", "DE", "FR", "JP", "UA"];
 export function generateFixtures(): { brands: Brand[]; ads: Ad[] } {
   // Reset xorshift32 for each call; unsigned output and fixed iteration order.
   let state = 0x47484b44;
+
   function randomInt(limit: number): number {
     state ^= state << 13;
     state ^= state >>> 17;
@@ -21,7 +22,9 @@ export function generateFixtures(): { brands: Brand[]; ads: Ad[] } {
     id: index + 1,
     name: `${niches[index % niches.length].name} Brand ${String(index + 1).padStart(3, "0")}`,
   }));
+
   const ads: Ad[] = [];
+
   for (let index = 0; index < 20_000; index++) {
     const brand = brands[index % brands.length];
     const round = Math.floor(index / brands.length);
@@ -30,31 +33,22 @@ export function generateFixtures(): { brands: Brand[]; ads: Ad[] } {
     // Rotate per-brand schedules while retaining exact global 60%/40% counts.
     const slot = (index + round) % 5;
     const active = slot < 3;
-    const startDay =
-      index === 0
-        ? 0
-        : index === 19_999
-          ? startDayCount - 1
-          : randomInt(startDayCount);
+    const startDay = index === 0 ? 0 : index === 19_999 ? startDayCount - 1 : randomInt(startDayCount);
     const startTime = firstStart + startDay * dayMs;
     const startDate = new Date(startTime).toISOString().slice(0, 10);
     const timing = active
       ? { status: "active" as const, endDate: null }
       : {
           status: "inactive" as const,
-          endDate: new Date(
-            startTime + randomInt(startDayCount - startDay + 1) * dayMs,
-          )
-            .toISOString()
-            .slice(0, 10),
+          endDate: new Date(startTime + randomInt(startDayCount - startDay + 1) * dayMs).toISOString().slice(0, 10),
         };
     const countryIndex = randomInt(fixtureCountries.length);
     const countries = [fixtureCountries[countryIndex]];
+
     if (randomInt(2) === 1) {
-      countries.push(
-        fixtureCountries[(countryIndex + 1) % fixtureCountries.length],
-      );
+      countries.push(fixtureCountries[(countryIndex + 1) % fixtureCountries.length]);
     }
+
     ads.push({
       id: `seed-ad-${String(index + 1).padStart(6, "0")}`,
       brandId: brand.id,
@@ -69,5 +63,6 @@ export function generateFixtures(): { brands: Brand[]; ads: Ad[] } {
       discoveredAt: new Date(referenceTime + index * 1_000),
     });
   }
+
   return { brands, ads };
 }

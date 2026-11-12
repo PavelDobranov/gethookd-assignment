@@ -18,9 +18,7 @@ async function migrate() {
 }
 
 beforeAll(async () => {
-  const result = await db.execute(
-    sql`SELECT to_regclass('public.users') AS name`,
-  );
+  const result = await db.execute(sql`SELECT to_regclass('public.users') AS name`);
   expect(result.rows).toEqual([{ name: null }]);
   await migrate();
 }, 20000);
@@ -68,24 +66,19 @@ it.each([
     passwordHash: null,
     column: "password_hash",
   },
-])(
-  "rejects SQL NULL for $column",
-  async ({ id, username, passwordHash, column }) => {
-    await expect(
-      db.execute(sql`
+])("rejects SQL NULL for $column", async ({ id, username, passwordHash, column }) => {
+  await expect(
+    db.execute(sql`
     INSERT INTO users (id, username, password_hash)
     VALUES (${id}::uuid, ${username}, ${passwordHash})
   `),
-    ).rejects.toMatchObject({ cause: { code: "23502", column } });
-  },
-);
+  ).rejects.toMatchObject({ cause: { code: "23502", column } });
+});
 
 it("closes its owned pool explicitly", async () => {
   const connection = createDatabase(inject("postgresUrl"));
   try {
-    expect((await connection.db.execute(sql`SELECT 1 AS value`)).rows).toEqual([
-      { value: 1 },
-    ]);
+    expect((await connection.db.execute(sql`SELECT 1 AS value`)).rows).toEqual([{ value: 1 }]);
   } finally {
     await connection.close();
   }
@@ -96,14 +89,9 @@ it("closes its owned pool explicitly", async () => {
 
 it("round-trips parameterized user data and keeps the ID stable on updates", async () => {
   const username = "test'; DROP TABLE users; --";
-  const [created] = await db
-    .insert(users)
-    .values({ username, passwordHash: "opaque-test-hash" })
-    .returning();
+  const [created] = await db.insert(users).values({ username, passwordHash: "opaque-test-hash" }).returning();
   expect(created.id).toMatch(/^[0-9a-f-]{36}$/);
-  expect(
-    await db.select().from(users).where(eq(users.username, username)),
-  ).toEqual([created]);
+  expect(await db.select().from(users).where(eq(users.username, username))).toEqual([created]);
   const [updated] = await db
     .update(users)
     .set({ passwordHash: "replacement-test-hash" })
@@ -121,23 +109,14 @@ it("reapplying committed migrations preserves both users and the migration ledge
     passwordHash: "preserved-test-hash",
   });
   const before = await db.select().from(users);
-  const ledger = await db.execute(
-    sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
-  );
-  expect(
-    ledger.rows.map(({ hash, created_at }) => ({ hash, created_at })),
-  ).toEqual(
-    readMigrationFiles({ migrationsFolder: "drizzle" }).map(
-      ({ hash, folderMillis }) => ({ hash, created_at: String(folderMillis) }),
-    ),
+  const ledger = await db.execute(sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`);
+  expect(ledger.rows.map(({ hash, created_at }) => ({ hash, created_at }))).toEqual(
+    readMigrationFiles({ migrationsFolder: "drizzle" }).map(({ hash, folderMillis }) => ({
+      hash,
+      created_at: String(folderMillis),
+    })),
   );
   await migrate();
   expect(await db.select().from(users)).toEqual(before);
-  expect(
-    (
-      await db.execute(
-        sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
-      )
-    ).rows,
-  ).toEqual(ledger.rows);
+  expect((await db.execute(sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`)).rows).toEqual(ledger.rows);
 }, 20000);

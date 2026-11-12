@@ -2,10 +2,7 @@ import { once } from "node:events";
 import type { Server } from "node:http";
 import express, { type Response } from "express";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  type AuthenticatedLocals,
-  createRequireAuthentication,
-} from "../src/auth/middleware.js";
+import { type AuthenticatedLocals, createRequireAuthentication } from "../src/auth/middleware.js";
 
 let server: Server | undefined;
 
@@ -21,25 +18,14 @@ async function listen() {
   app.get("/public", (_req, res) => {
     res.json({ public: true });
   });
-  app.get(
-    "/protected",
-    requireAuthentication,
-    (_req, res: Response<unknown, AuthenticatedLocals>) => {
-      protectedHandler();
-      res.json({ user: res.locals.user });
-    },
-  );
-  app.use(
-    (
-      error: unknown,
-      _req: express.Request,
-      res: express.Response,
-      _next: express.NextFunction,
-    ) => {
-      errorHandler(error);
-      res.sendStatus(503);
-    },
-  );
+  app.get("/protected", requireAuthentication, (_req, res: Response<unknown, AuthenticatedLocals>) => {
+    protectedHandler();
+    res.json({ user: res.locals.user });
+  });
+  app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    errorHandler(error);
+    res.sendStatus(503);
+  });
 
   server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -63,13 +49,7 @@ afterEach(async () => {
 
 it("rejects missing or malformed bearer headers without looking up a user or running the handler", async () => {
   const origin = await listen();
-  for (const authorization of [
-    undefined,
-    "Basic abc",
-    "Bearer",
-    "Bearer  abc",
-    "Bearer abc extra",
-  ]) {
+  for (const authorization of [undefined, "Basic abc", "Bearer", "Bearer  abc", "Bearer abc extra"]) {
     const response = await fetch(`${origin}/protected`, {
       headers: authorization ? { authorization } : {},
     });
@@ -97,9 +77,7 @@ it("rejects an unresolved user without running the handler", async () => {
 });
 
 it("looks up the user on each request and exposes it through locals before running the handler", async () => {
-  getUser
-    .mockResolvedValueOnce(user)
-    .mockResolvedValueOnce({ ...user, username: "renamed" });
+  getUser.mockResolvedValueOnce(user).mockResolvedValueOnce({ ...user, username: "renamed" });
   const origin = await listen();
   for (const username of ["demo", "renamed"]) {
     const response = await fetch(`${origin}/protected`, {

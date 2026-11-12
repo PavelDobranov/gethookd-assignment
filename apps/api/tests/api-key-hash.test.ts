@@ -8,9 +8,7 @@ it("hashes the public development fixture as SHA-256 lowercase hexadecimal", () 
 });
 
 it("hashes the exact key without trimming or changing case", () => {
-  expect(hashApiKey("abc")).toBe(
-    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-  );
+  expect(hashApiKey("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   expect(hashApiKey("ABC")).not.toBe(hashApiKey("abc"));
   expect(hashApiKey(" abc ")).not.toBe(hashApiKey("abc"));
 });

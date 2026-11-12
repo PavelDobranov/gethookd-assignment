@@ -10,10 +10,16 @@ export function runCommand(command, args, timeout) {
       detached: process.platform !== "win32",
       stdio: "ignore", // Child diagnostics can contain SQL parameters or credentials.
     });
+
     let terminated = false;
+
     function terminate() {
       terminated = true;
-      if (!child.pid) return;
+
+      if (!child.pid) {
+        return;
+      }
+
       if (process.platform === "win32") {
         execFile(
           "taskkill",
@@ -31,16 +37,25 @@ export function runCommand(command, args, timeout) {
         }
       }
     }
+
     const deadline = setTimeout(terminate, timeout);
+
     process.once("SIGINT", terminate);
     process.once("SIGTERM", terminate);
+
     function finish(code) {
       clearTimeout(deadline);
+
       process.removeListener("SIGINT", terminate);
       process.removeListener("SIGTERM", terminate);
-      if (code === 0 && !terminated) resolve();
-      else reject(new Error("Command failed or timed out."));
+
+      if (code === 0 && !terminated) {
+        resolve();
+      } else {
+        reject(new Error("Command failed or timed out."));
+      }
     }
+
     child.once("error", () => finish(null));
     child.once("close", finish);
   });
@@ -48,31 +63,15 @@ export function runCommand(command, args, timeout) {
 
 export async function runSetup(run = runCommand) {
   let stage = "database readiness";
+
   try {
-    await run(
-      "docker",
-      [
-        "compose",
-        "up",
-        "--detach",
-        "--wait",
-        "--wait-timeout",
-        "30",
-        "--no-deps",
-        "db",
-      ],
-      120000,
-    );
+    await run("docker", ["compose", "up", "--detach", "--wait", "--wait-timeout", "30", "--no-deps", "db"], 120000);
+
     stage = "database initialization";
+
     await run(
       process.execPath,
-      [
-        "--import",
-        "tsx",
-        fileURLToPath(
-          new URL("../apps/api/src/db/initialize.ts", import.meta.url),
-        ),
-      ],
+      ["--import", "tsx", fileURLToPath(new URL("../apps/api/src/db/initialize.ts", import.meta.url))],
       60000,
     );
   } catch {
@@ -80,15 +79,12 @@ export async function runSetup(run = runCommand) {
   }
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    console.info(
-      "Waiting for PostgreSQL, then applying committed migrations and seed...",
-    );
+    console.info("Waiting for PostgreSQL, then applying committed migrations and seed...");
+
     await runSetup();
+
     console.info("Setup completed. Run npm run dev to start API and web.");
   } catch (error) {
     console.error(error.message);

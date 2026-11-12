@@ -13,13 +13,11 @@ import { seedWorld } from "../src/db/seed-world.js";
 
 // Both databases belong exclusively to the disposable PostgreSQL test server.
 const postgresUrl = inject("postgresUrl");
-const connections = ["gethookd_world_seed_a", "gethookd_world_seed_b"].map(
-  (name) => {
-    const url = new URL(postgresUrl);
-    url.pathname = `/${name}`;
-    return { name, url: url.href, ...createDatabase(url.href) };
-  },
-);
+const connections = ["gethookd_world_seed_a", "gethookd_world_seed_b"].map((name) => {
+  const url = new URL(postgresUrl);
+  url.pathname = `/${name}`;
+  return { name, url: url.href, ...createDatabase(url.href) };
+});
 const [first, second] = connections;
 const run = promisify(execFile);
 
@@ -82,26 +80,15 @@ it("persists identical complete ordered worlds in two independently initialized 
   // Password salts and generated user/key UUIDs are intentionally not compared.
   expect(world.brands).toHaveLength(300);
   expect(world.ads).toHaveLength(20_000);
-  expect(world.brands.map((brand) => brand.id)).toEqual(
-    Array.from({ length: 300 }, (_, i) => i + 1),
-  );
+  expect(world.brands.map((brand) => brand.id)).toEqual(Array.from({ length: 300 }, (_, i) => i + 1));
   expect(new Set(world.brands.map((brand) => brand.name)).size).toBe(300);
   expect(world.ads.map((ad) => ad.id)).toEqual(
-    Array.from(
-      { length: 20_000 },
-      (_, i) => `seed-ad-${String(i + 1).padStart(6, "0")}`,
-    ),
+    Array.from({ length: 20_000 }, (_, i) => `seed-ad-${String(i + 1).padStart(6, "0")}`),
   );
   expect(world.ads.filter((ad) => ad.status === "active")).toHaveLength(12_000);
-  expect(world.ads.filter((ad) => ad.impressionRank === null)).toHaveLength(
-    8_000,
-  );
-  expect(new Set(world.ads.map((ad) => ad.format))).toEqual(
-    new Set(["image", "video", "carousel"]),
-  );
-  expect(new Set(world.ads.map((ad) => ad.niche))).toEqual(
-    new Set(niches.map((niche) => niche.slug)),
-  );
+  expect(world.ads.filter((ad) => ad.impressionRank === null)).toHaveLength(8_000);
+  expect(new Set(world.ads.map((ad) => ad.format))).toEqual(new Set(["image", "video", "carousel"]));
+  expect(new Set(world.ads.map((ad) => ad.niche))).toEqual(new Set(niches.map((niche) => niche.slug)));
   for (const niche of niches) {
     const headlines = world.ads
       .filter((ad) => ad.niche === niche.slug)
@@ -121,20 +108,14 @@ it("persists identical complete ordered worlds in two independently initialized 
     expect(ad.countries.length).toBeGreaterThan(0);
     expect(ad.countries.every(isCountryCode)).toBe(true);
     expect(new Set(ad.countries).size).toBe(ad.countries.length);
-    expect(new Date(ad.startDate).toISOString().slice(0, 10)).toBe(
-      ad.startDate,
-    );
-    expect(ad.discoveredAt.toISOString()).toMatch(
-      /^2026-10-05T\d{2}:\d{2}:\d{2}\.000Z$/,
-    );
+    expect(new Date(ad.startDate).toISOString().slice(0, 10)).toBe(ad.startDate);
+    expect(ad.discoveredAt.toISOString()).toMatch(/^2026-10-05T\d{2}:\d{2}:\d{2}\.000Z$/);
     if (ad.status === "active") {
       expect(ad.endDate).toBeNull();
     } else {
       expect(ad.status).toBe("inactive");
       expect(ad.endDate).not.toBeNull();
-      expect(new Date(ad.endDate ?? "").toISOString().slice(0, 10)).toBe(
-        ad.endDate,
-      );
+      expect(new Date(ad.endDate ?? "").toISOString().slice(0, 10)).toBe(ad.endDate);
       expect(ad.endDate >= ad.startDate).toBe(true);
       expect(ad.endDate <= "2026-10-05").toBe(true);
     }
@@ -155,14 +136,9 @@ it("preserves all evolved records through initialization and seed while restorin
   await seedDatabase(db);
   const fixtures = generateFixtures();
   const ranked = highestRankedFixture();
-  const nullRanked = fixtures.ads.find(
-    (ad) => ad.brandId === 1 && ad.impressionRank === null,
-  );
-  if (!nullRanked || ranked.impressionRank === null)
-    throw new Error("Expected repair fixtures");
-  const changed = fixtures.ads.find(
-    (ad) => ad.brandId === 2 && ad.status === "active",
-  );
+  const nullRanked = fixtures.ads.find((ad) => ad.brandId === 1 && ad.impressionRank === null);
+  if (!nullRanked || ranked.impressionRank === null) throw new Error("Expected repair fixtures");
+  const changed = fixtures.ads.find((ad) => ad.brandId === 2 && ad.status === "active");
   if (!changed) throw new Error("Expected active fixture");
   await db
     .update(users)
@@ -173,13 +149,8 @@ it("preserves all evolved records through initialization and seed while restorin
     .values({ username: "unrelated", passwordHash: "test-only-hash" })
     .returning();
   await db.update(apiKeys).set({ userId: unrelated.id });
-  await db
-    .insert(apiKeys)
-    .values({ userId: unrelated.id, keyHash: "unrelated-key-hash" });
-  await db
-    .update(brands)
-    .set({ name: "Evolved brand" })
-    .where(eq(brands.id, 2));
+  await db.insert(apiKeys).values({ userId: unrelated.id, keyHash: "unrelated-key-hash" });
+  await db.update(brands).set({ name: "Evolved brand" }).where(eq(brands.id, 2));
   await db
     .update(ads)
     .set({
@@ -205,9 +176,7 @@ it("preserves all evolved records through initialization and seed while restorin
     discoveredAt: new Date("2026-10-06T12:00:00Z"),
   });
   await db.insert(brands).values({ id: 999, name: "Unrelated brand" });
-  await db
-    .insert(ads)
-    .values({ ...nullRanked, id: "unrelated-ad", brandId: 999 });
+  await db.insert(ads).values({ ...nullRanked, id: "unrelated-ad", brandId: 999 });
   await db.execute(sql`UPDATE ads SET discovered_at = '2026-10-06T12:00:00.123456Z'
     WHERE id = 'ingest-ad-occupied-highest-rank'`);
   const before = await readRecords();
@@ -221,34 +190,24 @@ it("preserves all evolved records through initialization and seed while restorin
     ...ranked,
     impressionRank: ranked.impressionRank + 1,
   });
-  expect(await db.select().from(ads).where(eq(ads.id, nullRanked.id))).toEqual([
-    nullRanked,
-  ]);
-  expect(await db.select().from(brands).where(eq(brands.id, 300))).toEqual([
-    fixtures.brands[299],
-  ]);
-  expect(
-    await db.select().from(ads).where(eq(ads.brandId, 300)).orderBy(ads.id),
-  ).toEqual(fixtures.ads.filter((ad) => ad.brandId === 300));
+  expect(await db.select().from(ads).where(eq(ads.id, nullRanked.id))).toEqual([nullRanked]);
+  expect(await db.select().from(brands).where(eq(brands.id, 300))).toEqual([fixtures.brands[299]]);
+  expect(await db.select().from(ads).where(eq(ads.brandId, 300)).orderBy(ads.id)).toEqual(
+    fixtures.ads.filter((ad) => ad.brandId === 300),
+  );
   const restored = new Set([
     `ads:${ranked.id}`,
     `ads:${nullRanked.id}`,
     "brands:300",
-    ...fixtures.ads
-      .filter((ad) => ad.brandId === 300)
-      .map((ad) => `ads:${ad.id}`),
+    ...fixtures.ads.filter((ad) => ad.brandId === 300).map((ad) => `ads:${ad.id}`),
   ]);
   const after = await readRecords();
   expect(after.length).toBe(before.length + restored.size);
   expect(
-    JSON.stringify(
-      after.filter((row) => !restored.has(`${row.table}:${row.id}`)),
-    ) === JSON.stringify(before),
+    JSON.stringify(after.filter((row) => !restored.has(`${row.table}:${row.id}`))) === JSON.stringify(before),
   ).toBe(true);
   await seedDatabase(db);
-  expect(JSON.stringify(await readRecords()) === JSON.stringify(after)).toBe(
-    true,
-  );
+  expect(JSON.stringify(await readRecords()) === JSON.stringify(after)).toBe(true);
 }, 20000);
 
 it("rolls back earlier world batches and brand inserts on an unexpected uniqueness conflict", async () => {
@@ -268,12 +227,8 @@ it("rolls back earlier world batches and brand inserts on an unexpected uniquene
   await db.execute(sql`CREATE TRIGGER collide_world_id BEFORE INSERT ON ads
     FOR EACH ROW WHEN (NEW.id = 'seed-ad-019800') EXECUTE FUNCTION collide_world_id()`);
   try {
-    await expect(
-      db.transaction((tx) => seedWorld(tx, missing)),
-    ).rejects.toThrow();
-    expect(JSON.stringify(await readRecords()) === JSON.stringify(before)).toBe(
-      true,
-    );
+    await expect(db.transaction((tx) => seedWorld(tx, missing))).rejects.toThrow();
+    expect(JSON.stringify(await readRecords()) === JSON.stringify(before)).toBe(true);
   } finally {
     await db.execute(sql`DROP TRIGGER collide_world_id ON ads`);
     await db.execute(sql`DROP FUNCTION collide_world_id()`);
@@ -286,9 +241,7 @@ it.each([2_147_483_646, 2_147_483_647])(
     const { db } = first;
     const fixtures = generateFixtures();
     const world = {
-      brands: fixtures.brands.filter(
-        (brand) => brand.id === 1 || brand.id === 300,
-      ),
+      brands: fixtures.brands.filter((brand) => brand.id === 1 || brand.id === 300),
       ads: fixtures.ads.filter((ad) => ad.brandId === 1 || ad.brandId === 300),
     };
     const seed = () => db.transaction((tx) => seedWorld(tx, world));
@@ -307,27 +260,19 @@ it.each([2_147_483_646, 2_147_483_647])(
     const before = await readRecords();
     if (maximum === 2_147_483_647) {
       await expect(seed()).rejects.toThrow("Fixture rank space exhausted.");
-      expect(
-        JSON.stringify(await readRecords()) === JSON.stringify(before),
-      ).toBe(true);
+      expect(JSON.stringify(await readRecords()) === JSON.stringify(before)).toBe(true);
     } else {
       await seed();
-      const [repaired] = await db
-        .select()
-        .from(ads)
-        .where(eq(ads.id, ranked.id));
+      const [repaired] = await db.select().from(ads).where(eq(ads.id, ranked.id));
       expect(repaired).toEqual({ ...ranked, impressionRank: 2_147_483_647 });
       const after = await readRecords();
       expect(after.length).toBe(before.length + 1);
       expect(
-        JSON.stringify(
-          after.filter((row) => !(row.table === "ads" && row.id === ranked.id)),
-        ) === JSON.stringify(before),
+        JSON.stringify(after.filter((row) => !(row.table === "ads" && row.id === ranked.id))) ===
+          JSON.stringify(before),
       ).toBe(true);
       await seed();
-      expect(
-        JSON.stringify(await readRecords()) === JSON.stringify(after),
-      ).toBe(true);
+      expect(JSON.stringify(await readRecords()) === JSON.stringify(after)).toBe(true);
     }
   },
   20000,

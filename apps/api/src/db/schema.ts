@@ -1,14 +1,6 @@
 import { sql } from "drizzle-orm";
-import {
-  check,
-  date,
-  integer,
-  pgTable,
-  text,
-  timestamp,
-  unique,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { check, date, integer, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+
 import { type Ad, adFormats, adStatuses, niches } from "../ads/index.js";
 
 export const users = pgTable("users", {

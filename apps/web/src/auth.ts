@@ -1,9 +1,4 @@
-export type AuthErrorKind =
-  | "unauthenticated"
-  | "unavailable"
-  | "request"
-  | "invalid_response"
-  | "storage";
+export type AuthErrorKind = "unauthenticated" | "unavailable" | "request" | "invalid_response" | "storage";
 
 export class AuthError extends Error {
   constructor(
@@ -68,27 +63,16 @@ async function request(
       redirect: "error",
     });
   } catch {
-    throw new AuthError(
-      "unavailable",
-      "Authentication service is unavailable.",
-    );
+    throw new AuthError("unavailable", "Authentication service is unavailable.");
   }
   if (response.status === 401) {
     throw new AuthError("unauthenticated", "Authentication is required.", 401);
   }
   if (response.status >= 500) {
-    throw new AuthError(
-      "unavailable",
-      "Authentication service is unavailable.",
-      response.status,
-    );
+    throw new AuthError("unavailable", "Authentication service is unavailable.", response.status);
   }
   if (!response.ok) {
-    throw new AuthError(
-      "request",
-      "Authentication request failed.",
-      response.status,
-    );
+    throw new AuthError("request", "Authentication request failed.", response.status);
   }
   let body: unknown;
   try {
@@ -130,10 +114,7 @@ export const TOKEN_STORAGE_KEY = "gethookd.auth.token";
 function isToken(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const parts = value.split(".");
-  return (
-    parts.length === 3 &&
-    parts.every((part) => part.length > 0 && !/[^A-Za-z0-9_-]/.test(part))
-  );
+  return parts.length === 3 && parts.every((part) => part.length > 0 && !/[^A-Za-z0-9_-]/.test(part));
 }
 
 export function readToken(): string | null {

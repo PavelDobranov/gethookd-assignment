@@ -30,12 +30,8 @@ afterAll(close);
 beforeEach(async () => {
   // Only this suite's database in the disposable test project is touched.
   await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
-  await db.execute(
-    sql`INSERT INTO brands (id, name) VALUES (1, 'First'), (2, 'Second')`,
-  );
-  await db
-    .insert(users)
-    .values({ id: ownerId, username: "owner", passwordHash: "test-hash" });
+  await db.execute(sql`INSERT INTO brands (id, name) VALUES (1, 'First'), (2, 'Second')`);
+  await db.insert(users).values({ id: ownerId, username: "owner", passwordHash: "test-hash" });
 });
 
 function insertAd(overrides: Record<string, unknown> = {}) {
@@ -109,41 +105,31 @@ it("round-trips domain fixtures through Drizzle and preserves all world records 
   const ad = generateFixtures().ads[0];
   const [stored] = await db.insert(ads).values(ad).returning();
   expect(stored).toEqual(ad);
-  const keysBefore = await db
-    .insert(apiKeys)
-    .values({ userId: ownerId, keyHash: "round-trip-hash" })
-    .returning();
+  const keysBefore = await db.insert(apiKeys).values({ userId: ownerId, keyHash: "round-trip-hash" }).returning();
   const brandsBefore = await db.select().from(brands).orderBy(brands.id);
   const usersBefore = await db.select().from(users);
   await migrate(db, { migrationsFolder: "drizzle" });
   expect(await db.select().from(ads)).toEqual([ad]);
   expect(await db.select().from(apiKeys)).toEqual(keysBefore);
-  expect(await db.select().from(brands).orderBy(brands.id)).toEqual(
-    brandsBefore,
-  );
-  expect(
-    JSON.stringify(await db.select().from(users)) ===
-      JSON.stringify(usersBefore),
-  ).toBe(true);
+  expect(await db.select().from(brands).orderBy(brands.id)).toEqual(brandsBefore);
+  expect(JSON.stringify(await db.select().from(users)) === JSON.stringify(usersBefore)).toBe(true);
 });
 
 it.each(["id", "name"])("rejects NULL brands.%s", async (column) => {
   const id = column === "id" ? null : 3;
   const name = column === "name" ? null : "Third";
-  await expect(
-    db.execute(sql`INSERT INTO brands (id, name) VALUES (${id}, ${name})`),
-  ).rejects.toMatchObject({ cause: { code: "23502", column } });
+  await expect(db.execute(sql`INSERT INTO brands (id, name) VALUES (${id}, ${name})`)).rejects.toMatchObject({
+    cause: { code: "23502", column },
+  });
 });
 
 it("rejects duplicate brand IDs and non-integer brand identities", async () => {
-  await expect(
-    db.execute(sql`INSERT INTO brands (id, name) VALUES (1, 'Duplicate')`),
-  ).rejects.toMatchObject({
+  await expect(db.execute(sql`INSERT INTO brands (id, name) VALUES (1, 'Duplicate')`)).rejects.toMatchObject({
     cause: { code: "23505", constraint: "brands_pkey" },
   });
-  await expect(
-    db.execute(sql`INSERT INTO brands (id, name) VALUES ('1.5', 'Fractional')`),
-  ).rejects.toMatchObject({ cause: { code: "22P02" } });
+  await expect(db.execute(sql`INSERT INTO brands (id, name) VALUES ('1.5', 'Fractional')`)).rejects.toMatchObject({
+    cause: { code: "22P02" },
+  });
 });
 
 it.each([
@@ -171,9 +157,7 @@ it("rejects duplicate ad identities and orphaned brands", async () => {
   await expect(insertAd({ brand_id: 999 })).rejects.toMatchObject({
     cause: { code: "23503" },
   });
-  await expect(
-    db.execute(sql`DELETE FROM brands WHERE id = 1`),
-  ).rejects.toMatchObject({ cause: { code: "23503" } });
+  await expect(db.execute(sql`DELETE FROM brands WHERE id = 1`)).rejects.toMatchObject({ cause: { code: "23503" } });
 });
 
 it.each([
@@ -194,19 +178,14 @@ it.each([
 it.each([
   { status: "active", end_date: "2026-10-05" },
   { status: "inactive", end_date: null },
-])(
-  "rejects inconsistent status/end date $status/$end_date",
-  async (overrides) => {
-    await expect(insertAd(overrides)).rejects.toMatchObject({
-      cause: { code: "23514", constraint: "ads_status_end_date_check" },
-    });
-  },
-);
+])("rejects inconsistent status/end date $status/$end_date", async (overrides) => {
+  await expect(insertAd(overrides)).rejects.toMatchObject({
+    cause: { code: "23514", constraint: "ads_status_end_date_check" },
+  });
+});
 
 it("rejects end dates before start dates and malformed calendar dates/ranks", async () => {
-  await expect(
-    insertAd({ status: "inactive", end_date: "2026-10-03" }),
-  ).rejects.toMatchObject({
+  await expect(insertAd({ status: "inactive", end_date: "2026-10-03" })).rejects.toMatchObject({
     cause: { code: "23514", constraint: "ads_date_order_check" },
   });
   await expect(insertAd({ start_date: "2026-02-30" })).rejects.toMatchObject({
@@ -233,8 +212,7 @@ it("allows all catalog values and inactive dates equal to or after start", async
     "tech-accessories",
   ];
   for (const niche of niches) await insertAd({ niche });
-  for (const format of ["image", "video", "carousel"])
-    await insertAd({ format });
+  for (const format of ["image", "video", "carousel"]) await insertAd({ format });
   await insertAd({ status: "inactive", end_date: "2026-10-04" });
   await insertAd({ status: "inactive", end_date: "2026-10-05" });
 });
@@ -265,9 +243,7 @@ it("generates UUID key identities, enforces unique hashes and user references, a
     cause: { code: "23505", constraint: "api_keys_pkey" },
   });
   await expect(
-    db.execute(
-      sql`INSERT INTO api_keys (user_id, key_hash) VALUES (${ownerId}, 'first-hash')`,
-    ),
+    db.execute(sql`INSERT INTO api_keys (user_id, key_hash) VALUES (${ownerId}, 'first-hash')`),
   ).rejects.toMatchObject({
     cause: { code: "23505", constraint: "api_keys_key_hash_unique" },
   });
@@ -276,27 +252,24 @@ it("generates UUID key identities, enforces unique hashes and user references, a
       sql`INSERT INTO api_keys (user_id, key_hash) VALUES ('00000000-0000-0000-0000-000000000099', 'orphan-hash')`,
     ),
   ).rejects.toMatchObject({ cause: { code: "23503" } });
-  await expect(
-    db.execute(sql`DELETE FROM users WHERE id = ${ownerId}`),
-  ).rejects.toMatchObject({ cause: { code: "23503" } });
+  await expect(db.execute(sql`DELETE FROM users WHERE id = ${ownerId}`)).rejects.toMatchObject({
+    cause: { code: "23503" },
+  });
 });
 
-it.each(["id", "user_id", "key_hash"])(
-  "rejects NULL api_keys.%s",
-  async (column) => {
-    const record = {
-      id: "00000000-0000-0000-0000-000000000002",
-      user_id: ownerId,
-      key_hash: "hash",
-      [column]: null,
-    };
-    await expect(
-      db.execute(
-        sql`INSERT INTO api_keys SELECT * FROM jsonb_populate_record(NULL::api_keys, ${JSON.stringify(record)}::jsonb)`,
-      ),
-    ).rejects.toMatchObject({ cause: { code: "23502", column } });
-  },
-);
+it.each(["id", "user_id", "key_hash"])("rejects NULL api_keys.%s", async (column) => {
+  const record = {
+    id: "00000000-0000-0000-0000-000000000002",
+    user_id: ownerId,
+    key_hash: "hash",
+    [column]: null,
+  };
+  await expect(
+    db.execute(
+      sql`INSERT INTO api_keys SELECT * FROM jsonb_populate_record(NULL::api_keys, ${JSON.stringify(record)}::jsonb)`,
+    ),
+  ).rejects.toMatchObject({ cause: { code: "23502", column } });
+});
 
 it("upgrades an M1 database without changing users and replays the complete migration ledger unchanged", async () => {
   const directory = await mkdtemp(join(tmpdir(), "gethookd-m1-migrations-"));
@@ -304,48 +277,29 @@ it("upgrades an M1 database without changing users and replays the complete migr
   upgradeUrl.pathname = "/gethookd_world_upgrade";
   const connection = createDatabase(upgradeUrl.href);
   try {
-    const journal = JSON.parse(
-      await readFile("drizzle/meta/_journal.json", "utf8"),
-    );
+    const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8"));
     const first = journal.entries[0];
     expect(first.tag).toBe("0000_living_skreet");
     await mkdir(join(directory, "meta"));
-    await writeFile(
-      join(directory, "meta/_journal.json"),
-      JSON.stringify({ ...journal, entries: [first] }),
-    );
-    await writeFile(
-      join(directory, `${first.tag}.sql`),
-      await readFile(`drizzle/${first.tag}.sql`),
-    );
+    await writeFile(join(directory, "meta/_journal.json"), JSON.stringify({ ...journal, entries: [first] }));
+    await writeFile(join(directory, `${first.tag}.sql`), await readFile(`drizzle/${first.tag}.sql`));
     await migrate(connection.db, { migrationsFolder: directory });
     await connection.db.insert(users).values({
       username: "existing-m1-user",
       passwordHash: "preserved-exact-hash",
     });
     const before = await connection.db.select().from(users);
-    const oldLedger = await connection.db.execute(
-      sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
-    );
+    const oldLedger = await connection.db.execute(sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`);
     expect(oldLedger.rows).toHaveLength(1);
     await migrate(connection.db, { migrationsFolder: "drizzle" });
-    expect(
-      JSON.stringify(await connection.db.select().from(users)) ===
-        JSON.stringify(before),
-    ).toBe(true);
-    const ledger = await connection.db.execute(
-      sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
-    );
+    expect(JSON.stringify(await connection.db.select().from(users)) === JSON.stringify(before)).toBe(true);
+    const ledger = await connection.db.execute(sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`);
     expect(ledger.rows[0]).toEqual(oldLedger.rows[0]);
-    expect(
-      ledger.rows.map(({ hash, created_at }) => ({ hash, created_at })),
-    ).toEqual(
-      readMigrationFiles({ migrationsFolder: "drizzle" }).map(
-        ({ hash, folderMillis }) => ({
-          hash,
-          created_at: String(folderMillis),
-        }),
-      ),
+    expect(ledger.rows.map(({ hash, created_at }) => ({ hash, created_at }))).toEqual(
+      readMigrationFiles({ migrationsFolder: "drizzle" }).map(({ hash, folderMillis }) => ({
+        hash,
+        created_at: String(folderMillis),
+      })),
     );
     expect(
       (
@@ -355,17 +309,10 @@ it("upgrades an M1 database without changing users and replays the complete migr
       ).rows,
     ).toEqual([{ brands: "brands", ads: "ads", api_keys: "api_keys" }]);
     await migrate(connection.db, { migrationsFolder: "drizzle" });
-    expect(
-      (
-        await connection.db.execute(
-          sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
-        )
-      ).rows,
-    ).toEqual(ledger.rows);
-    expect(
-      JSON.stringify(await connection.db.select().from(users)) ===
-        JSON.stringify(before),
-    ).toBe(true);
+    expect((await connection.db.execute(sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`)).rows).toEqual(
+      ledger.rows,
+    );
+    expect(JSON.stringify(await connection.db.select().from(users)) === JSON.stringify(before)).toBe(true);
   } finally {
     await connection.close();
     await rm(directory, { recursive: true, force: true });

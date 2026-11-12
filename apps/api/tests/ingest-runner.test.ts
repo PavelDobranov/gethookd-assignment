@@ -40,9 +40,7 @@ describe("serial ingest process", () => {
 
   it("waits one second between completed ticks, without overlap or catch-up", async () => {
     const pending = deferred();
-    const h = harness(
-      vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined),
-    );
+    const h = harness(vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined));
     const running = runIngest(h);
     await vi.advanceTimersByTimeAsync(999);
     expect(h.tick).not.toHaveBeenCalled();
@@ -63,37 +61,31 @@ describe("serial ingest process", () => {
     expect(h.signals.listenerCount("SIGINT")).toBe(0);
   });
 
-  it.each(["SIGINT", "SIGTERM"])(
-    "%s cancels a pending wait and closes the pool",
-    async (signal) => {
-      const h = harness();
-      const running = runIngest(h);
-      h.signals.emit(signal);
-      expect(await running).toBe(0);
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(h.tick).not.toHaveBeenCalled();
-      expect(h.close).toHaveBeenCalledTimes(1);
-      expect(h.reportError).not.toHaveBeenCalled();
-    },
-  );
+  it.each(["SIGINT", "SIGTERM"])("%s cancels a pending wait and closes the pool", async (signal) => {
+    const h = harness();
+    const running = runIngest(h);
+    h.signals.emit(signal);
+    expect(await running).toBe(0);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.tick).not.toHaveBeenCalled();
+    expect(h.close).toHaveBeenCalledTimes(1);
+    expect(h.reportError).not.toHaveBeenCalled();
+  });
 
-  it.each(["SIGINT", "SIGTERM"])(
-    "%s drains an in-flight tick before cleanup",
-    async (signal) => {
-      const pending = deferred();
-      const h = harness(vi.fn(() => pending.promise));
-      const running = runIngest(h);
-      await vi.advanceTimersByTimeAsync(1000);
-      h.signals.emit(signal);
-      h.signals.emit(signal);
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(h.close).not.toHaveBeenCalled();
-      pending.resolve();
-      expect(await running).toBe(0);
-      expect(h.tick).toHaveBeenCalledTimes(1);
-      expect(h.close).toHaveBeenCalledTimes(1);
-    },
-  );
+  it.each(["SIGINT", "SIGTERM"])("%s drains an in-flight tick before cleanup", async (signal) => {
+    const pending = deferred();
+    const h = harness(vi.fn(() => pending.promise));
+    const running = runIngest(h);
+    await vi.advanceTimersByTimeAsync(1000);
+    h.signals.emit(signal);
+    h.signals.emit(signal);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.close).not.toHaveBeenCalled();
+    pending.resolve();
+    expect(await running).toBe(0);
+    expect(h.tick).toHaveBeenCalledTimes(1);
+    expect(h.close).toHaveBeenCalledTimes(1);
+  });
 
   it("waits for a failed tick to roll back, then fails without exposing raw errors", async () => {
     const pending = deferred();
@@ -102,18 +94,14 @@ describe("serial ingest process", () => {
     await vi.advanceTimersByTimeAsync(1000);
     h.signals.emit("SIGINT");
     expect(h.close).not.toHaveBeenCalled();
-    pending.reject(
-      new Error("postgres://credential-sentinel@private/database"),
-    );
+    pending.reject(new Error("postgres://credential-sentinel@private/database"));
     expect(await running).toBe(1);
     expect(h.close).toHaveBeenCalledTimes(1);
     expect(h.reportError.mock.calls).toEqual([["Ingest failed."]]);
   });
 
   it("stops after a tick failure even without a signal", async () => {
-    const h = harness(
-      vi.fn().mockRejectedValue(new Error("raw database failure")),
-    );
+    const h = harness(vi.fn().mockRejectedValue(new Error("raw database failure")));
     const running = runIngest(h);
     await vi.advanceTimersByTimeAsync(10000);
     expect(await running).toBe(1);
@@ -140,8 +128,6 @@ describe("serial ingest process", () => {
     const running = runIngest(h);
     h.signals.emit("SIGTERM");
     expect(await running).toBe(1);
-    expect(h.reportError.mock.calls).toEqual([
-      ["Ingest database shutdown failed."],
-    ]);
+    expect(h.reportError.mock.calls).toEqual([["Ingest database shutdown failed."]]);
   });
 });

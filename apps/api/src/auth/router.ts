@@ -1,17 +1,8 @@
-import {
-  json,
-  type Request,
-  type RequestHandler,
-  type Response,
-  Router,
-} from "express";
+import { json, type Request, type RequestHandler, type Response, Router } from "express";
 
 import type { createDatabase } from "../db/client.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
-import {
-  type AuthenticatedLocals,
-  createRequireAuthentication,
-} from "./middleware.js";
+import { type AuthenticatedLocals, createRequireAuthentication } from "./middleware.js";
 import { createAuthService } from "./service.js";
 import { parseCredentials } from "./validation.js";
 
@@ -20,9 +11,7 @@ type AuthRouterDependencies = {
   jwtSecret: string;
 };
 
-function createLoginHandler(
-  auth: Pick<ReturnType<typeof createAuthService>, "login">,
-): RequestHandler {
+function createLoginHandler(auth: Pick<ReturnType<typeof createAuthService>, "login">): RequestHandler {
   return async function handleLogin(req, res) {
     const credentials = parseCredentials(req.body);
 
@@ -30,8 +19,7 @@ function createLoginHandler(
       res.status(422).json({
         error: {
           code: "VALIDATION_ERROR",
-          message:
-            "Username and password must be nonempty strings of at most 100 and 1024 characters.",
+          message: "Username and password must be nonempty strings of at most 100 and 1024 characters.",
         },
       });
       return;
@@ -53,10 +41,7 @@ function createLoginHandler(
   };
 }
 
-function handleGetMe(
-  _req: Request,
-  res: Response<unknown, AuthenticatedLocals>,
-) {
+function handleGetMe(_req: Request, res: Response<unknown, AuthenticatedLocals>) {
   res.json({ user: res.locals.user });
 }
 

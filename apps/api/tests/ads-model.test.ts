@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  adFormats,
-  adStatuses,
-  daysActive,
-  isCountryCode,
-  niches,
-} from "../src/ads/model.js";
+import { adFormats, adStatuses, daysActive, isCountryCode, niches } from "../src/ads/model.js";
 
 const expectedNiches = [
   ["skincare", "Skincare", ["serum", "glow", "SPF"]],
@@ -24,33 +18,18 @@ const expectedNiches = [
 
 describe("ad catalog", () => {
   it("pins every niche mapping, format and status", () => {
-    expect(
-      niches.map(({ slug, name, keywords }) => [slug, name, keywords]),
-    ).toEqual(expectedNiches);
+    expect(niches.map(({ slug, name, keywords }) => [slug, name, keywords])).toEqual(expectedNiches);
     expect(adFormats).toEqual(["image", "video", "carousel"]);
     expect(adStatuses).toEqual(["active", "inactive"]);
   });
 
-  it.each(["US", "GB", "UA", "DE", "JP", "AX", "AQ", "BQ", "ZW"])(
-    "accepts assigned ISO-2 code %s",
-    (code) => expect(isCountryCode(code)).toBe(true),
+  it.each(["US", "GB", "UA", "DE", "JP", "AX", "AQ", "BQ", "ZW"])("accepts assigned ISO-2 code %s", (code) =>
+    expect(isCountryCode(code)).toBe(true),
   );
 
-  it.each([
-    "",
-    "ZZ",
-    "UK",
-    "XK",
-    "EU",
-    "USA",
-    "us",
-    " US",
-    "US ",
-    "U1",
-    null,
-    42,
-  ])("rejects invalid country %s", (code) =>
-    expect(isCountryCode(code)).toBe(false),
+  it.each(["", "ZZ", "UK", "XK", "EU", "USA", "us", " US", "US ", "U1", null, 42])(
+    "rejects invalid country %s",
+    (code) => expect(isCountryCode(code)).toBe(false),
   );
 });
 
@@ -61,19 +40,12 @@ describe("whole UTC calendar days", () => {
     ["2026-10-05T23:30:00-02:00", 1],
     ["2026-10-06T00:30:00+02:00", 0],
   ])("uses today's UTC date at %s", (now, expected) => {
-    expect(
-      daysActive(
-        { startDate: "2026-10-05", status: "active", endDate: null },
-        new Date(now),
-      ),
-    ).toBe(expected);
+    expect(daysActive({ startDate: "2026-10-05", status: "active", endDate: null }, new Date(now))).toBe(expected);
   });
 
   it("uses the actual current date by default for active ads", () => {
     const today = new Date().toISOString().slice(0, 10);
-    expect(
-      daysActive({ startDate: today, status: "active", endDate: null }),
-    ).toBe(0);
+    expect(daysActive({ startDate: today, status: "active", endDate: null })).toBe(0);
   });
 
   it("uses the inactive end date, not the supplied current date", () => {
@@ -94,10 +66,7 @@ describe("whole UTC calendar days", () => {
 
   it("counts calendar days across a daylight-saving transition", () => {
     expect(
-      daysActive(
-        { startDate: "2026-03-07", status: "active", endDate: null },
-        new Date("2026-03-09T00:01:00Z"),
-      ),
+      daysActive({ startDate: "2026-03-07", status: "active", endDate: null }, new Date("2026-03-09T00:01:00Z")),
     ).toBe(2);
   });
 });

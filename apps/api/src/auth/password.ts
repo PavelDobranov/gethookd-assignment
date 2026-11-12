@@ -7,11 +7,7 @@ const keyBytes = 64;
 const format = `scrypt$${cost.N}$${cost.r}$${cost.p}`;
 
 function validPassword(password: string) {
-  return (
-    typeof password === "string" &&
-    password.length > 0 &&
-    password.length <= 1024
-  );
+  return typeof password === "string" && password.length > 0 && password.length <= 1024;
 }
 
 function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
@@ -25,25 +21,17 @@ function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
 
 export async function hashPassword(password: string): Promise<string> {
   if (!validPassword(password)) {
-    throw new TypeError(
-      "Password must be a nonempty string of at most 1024 characters",
-    );
+    throw new TypeError("Password must be a nonempty string of at most 1024 characters");
   }
 
   const salt = randomBytes(saltBytes);
   const key = await deriveKey(password, salt);
+
   return `${format}$${salt.toString("hex")}$${key.toString("hex")}`;
 }
 
-export async function verifyPassword(
-  password: string,
-  storedHash: string,
-): Promise<boolean> {
-  if (
-    !validPassword(password) ||
-    typeof storedHash !== "string" ||
-    storedHash.length > 256
-  ) {
+export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (!validPassword(password) || typeof storedHash !== "string" || storedHash.length > 256) {
     return false;
   }
 
@@ -54,15 +42,11 @@ export async function verifyPassword(
   }
 
   const [, , , , salt, key] = parts;
-  if (
-    salt.length !== saltBytes * 2 ||
-    key.length !== keyBytes * 2 ||
-    /[^a-f0-9]/.test(salt) ||
-    /[^a-f0-9]/.test(key)
-  ) {
+  if (salt.length !== saltBytes * 2 || key.length !== keyBytes * 2 || /[^a-f0-9]/.test(salt) || /[^a-f0-9]/.test(key)) {
     return false;
   }
 
   const derived = await deriveKey(password, Buffer.from(salt, "hex"));
+
   return timingSafeEqual(derived, Buffer.from(key, "hex"));
 }
