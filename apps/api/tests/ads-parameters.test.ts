@@ -6,6 +6,67 @@ function parse(query = "") {
   return parseAdParameters(new URLSearchParams(`api_key=test-key&${query}`));
 }
 
+describe("v0 pagination", () => {
+  it.each([
+    ["", 1, 20, 0],
+    ["page=2", 2, 20, 20],
+    ["per_page=1", 1, 1, 0],
+    ["page=0002&per_page=003", 2, 3, 3],
+    ["page=3&per_page=100", 3, 100, 200],
+    ["page=3&per_page=101", 3, 100, 200],
+    ["page=2&per_page=9007199254740991", 2, 100, 100],
+    ["page=9007199254740991&per_page=1", 9007199254740991, 1, 9007199254740990],
+    ["page=90071992547410&per_page=101", 90071992547410, 100, 9007199254740900],
+    ["page=3002399751580331&per_page=3", 3002399751580331, 3, 9007199254740990],
+  ])(
+    "parses %s to page=%s, perPage=%s, offset=%s",
+    (query, page, perPage, offset) => {
+      expect(parse(query)).toMatchObject({ page, perPage, offset });
+    },
+  );
+
+  for (const name of ["page", "per_page"]) {
+    it.each([
+      "",
+      "0",
+      "000",
+      "-1",
+      "1.5",
+      "1.0",
+      "1e2",
+      "0x10",
+      "NaN",
+      "Infinity",
+      "abc",
+      "2tail",
+      "+1",
+      " 1",
+      "1 ",
+      "1\n",
+      "１",
+      "9007199254740992",
+      "9007199254740993",
+      "99999999999999999999999999999999999999999999",
+    ])(
+      `rejects invalid ${name}=%j without partial parsing or clamping unsafe input`,
+      (value) => {
+        expect(
+          parse(new URLSearchParams({ [name]: value }).toString()),
+        ).toBeNull();
+      },
+    );
+  }
+
+  it.each([
+    "page=90071992547411&per_page=100",
+    "page=9007199254740991",
+    "page=3002399751580332&per_page=3",
+    "page=90071992547411&per_page=9007199254740991",
+  ])("rejects unsafe offset for %s", (query) => {
+    expect(parse(query)).toBeNull();
+  });
+});
+
 describe("raw v0 parameters", () => {
   it("preserves a scalar key without authenticating or trimming it", () => {
     expect(

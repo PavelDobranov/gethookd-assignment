@@ -368,6 +368,37 @@ a deterministic fallback above both stored and full-fixture maxima; rank
 exhaustion fails and rolls back rather than renumbering or dropping fixtures.
 v0 HTTP authentication and live ingest remain separate pending slices.
 
+## Legacy v0 parameter contract
+
+`apps/api/src/ads/parameters.ts` provides `parseAdParameters(URLSearchParams)`;
+HTTP routing and database-backed authentication are separate pending slices.
+The parser returns typed values or `null` for the router's generic HTTP 400
+`{"error":"Invalid request"}` policy, without logging inputs or authenticating keys.
+
+Only exact names `q`, `niche`, `format`, `status`, `page`, `per_page`, and
+`api_key` are recognized. Repeating any recognized name fails, even with empty
+values. Unknown names (including `sort`, bracketed `niche[x]`, and repeated
+unknown names) are ignored. Use the raw URL query, not Express's nested query
+object, to preserve this distinction.
+
+- `q` is preserved as a literal substring, including spaces, `%` and `_`;
+  missing/empty means match all. Case-insensitive matching belongs to the query.
+- `niche` accepts a slug or display name case-insensitively, without trimming.
+  `format` and `status` accept only exact case-sensitive catalog values.
+  Empty/invalid filters omit only that filter; valid filters remain combined.
+- `api_key` must be one nonempty scalar; its value is preserved without trimming.
+  Parsing does not prove the key exists in storage.
+- Missing pagination defaults to `page=1`, `per_page=20`. Values must contain
+  only ASCII decimal digits and represent positive safe integers (leading zeros
+  are accepted). Empty, zero, negative, fractional, whitespace, exponent,
+  partial-numeric and unsafe values fail. Valid `per_page` values above 100 clamp
+  to 100 **before** calculating `(page - 1) * per_page`; unsafe offsets fail too.
+  The typed result uses `perPage`, `page`, and `offset` internally.
+
+```sh
+npm run test:unit -w @gethookd/api -- tests/ads-parameters.test.ts
+```
+
 ## Ad and API-key storage
 
 The append-only `0001_lucky_next_avengers.sql` migration adds `brands`, `ads`,
