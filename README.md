@@ -209,8 +209,8 @@ query parameters, so its allowed-values list is empty. Unsupported HEAD returns
 404 headers without a body, as required by HTTP. v0 and portal errors are unchanged.
 Search additionally returns `INVALID_CURSOR`, `CURSOR_EXPIRED` and
 `CURSOR_QUERY_MISMATCH` (422); retain the original query/token or start a fresh
-search as directed. OpenAPI coverage remains a later M3 slice; rate limiting
-remains M4 work.
+search as directed. The [OpenAPI contract](docs/openapi/v1.yaml) is checked against
+actual HTTP responses; rate limiting remains M4 work.
 
 ### v1 filtered search
 
@@ -236,6 +236,13 @@ curl -sS 'http://localhost:3000/api/v1/ads?sort=impressions&brand_id=1&limit=2' 
   -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
 # Missing brand_id intentionally produces 422 with a correction.
 curl -i 'http://localhost:3000/api/v1/ads?sort=impressions' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+
+# Exclusive boundary: ads starting ON 2026-10-04 do not match.
+curl -sS 'http://localhost:3000/api/v1/ads?started_after=2026-10-04' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+# Impossible calendar dates intentionally return actionable 422, not rollover.
+curl -i 'http://localhost:3000/api/v1/ads?started_after=2026-02-30' \
   -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
 
 # Paste next_cursor from a response; omitted filters inherit the original query.
@@ -308,9 +315,9 @@ two-second query/connection deadlines and leaves the pool usable. Disabling the
 insertion-visibility predicate makes all six controlled walks fail; restoring it
 passes. Removing the null-only continuation guard also fails on duplicate IDs.
 No production correction was needed. The cursor unit suite passes 95 tests.
-Actual-process ingest smoke coverage remains later M3 work; HTTP app recreation
-is not an OS-process restart test. These checks make no production-scale
-performance claim.
+Actual-process ingest and OS-process restart checks are recorded separately in
+[M3 workflow verification](#m3-workflow-verification). Neither these deterministic
+checks nor the smoke runs establish production-scale performance.
 
 ### v1 OpenAPI contract
 
@@ -1022,18 +1029,107 @@ and `npm test` passed: 267 API unit, 261 disposable-PostgreSQL and 65 web tests
 (593 total), including the unchanged v0 contract. No required #51 check remains
 unexecuted; final milestone acceptance/human review is separate (#52).
 
+## M3 workflow verification
+
+Measured on 2026-11-12 for #72, from source snapshots of `b586b07`, with Node
+26.13.0/npm 11.20.0, Docker 29.7.2/Compose 5.5.1 and PostgreSQL 17.11. Neither
+snapshot contained `.env`; the Docker build context also had no host dependencies
+or build output. The developer stack stayed running and was not targeted.
+
+Commands actually executed (not inferred from unit tests):
+
+```sh
+npm ci
+npm run setup
+npm run dev
+npm run ingest
+# Separate clean source snapshot, then repeat after live ingest:
+docker compose -p gethookd-72-docker-qa6gt1 \
+  -f compose.yaml -f acceptance.override.yaml up --build -d
+# Repeat local setup; Docker down/up retains the same isolated volume.
+npm run build
+npm run lint
+npm run check
+npm test
+```
+
+**Isolation differences:** local setup used project `gethookd-72-local-qa6gt1`,
+`COMPOSE_FILE=compose.yaml:acceptance.override.yaml` and an explicit test-owned
+`DATABASE_URL` at loopback port 15472. The temporary override changed only
+published ports. `npm run dev` ran in a Node 26.13.0 container sharing that
+project's network and installed source snapshot, with `DATABASE_URL` pointing to
+`db:5432`; this avoided the occupied host API port without changing application
+code. Its API was published at 13172. Vite's root, health proxy and Bearer niche
+request returned 200 from inside that namespace (`http://[::1]:5173`); Vite's
+loopback listener was not reachable through the container's published port.
+The full-Docker project used ports 15473/13073/18073 and **no server environment
+overrides** for fresh startup. These are isolated execution checks, not claims
+that the occupied default host ports were retested or that a new checkout was
+created. Ingest used explicit host URLs for the corresponding isolated database.
+
+- **Fresh/repeated startup:** `npm ci`, local setup/dev, and full-Docker build/up
+  succeeded. Each initialized 20,000 ads, 300 brands and the public hashed key.
+  Root `npm run ingest` was opt-in. After ingest stopped, repeat local setup and
+  Docker `down` → `up --build -d` preserved complete evolved users, key IDs/hashes/
+  owners and ad rows, including insertion markers. Checks included a changed demo
+  hash, unrelated user and reassigned key owner; initialization did not reset them.
+- **M2 upgrades:** the actual `main` baseline (`fa2e9c9`) initializer populated
+  separate `m2_upgrade` databases. Before upgrading, a headline/date/status was
+  changed, a backdated ad added, and users/key ownership evolved. Current local
+  setup and Docker setup both migrated 20,001 existing ads: one non-null backfill
+  transaction marker, zero nulls, all prior business fields/users/keys unchanged.
+  A subsequent insert received `pg_current_xact_id()` by default. Only this
+  additive metadata was excluded when comparing pre-M3 ad rows.
+- **Live walks:** on fresh local/Docker databases, actual root ingest overlapped
+  unfiltered newest and brand-1 impressions paging. Each walk returned exactly
+  the initial 20,000/67 IDs, without duplicates or post-boundary inserts. Local
+  ingest inserted 6/deactivated 2; Docker inserted 3/deactivated 6; both exited 0
+  on SIGINT. A second local run explicitly held **both** first pages until a tick
+  committed before continuing: all 20,006/67 initial IDs were returned exactly
+  once, with 9 inserts/7 deactivations observed over 6.7 seconds and shutdown 0.
+  Random backdating/races were not inferred: controlled PostgreSQL suites prove
+  those guarantees separately. No walk-long idle transaction remained.
+- **HTTP/lifecycle:** direct APIs and built Nginx proxy passed Bearer discovery,
+  detail, multi-niche/date/keyword search, normalized echoes, brand-required 422,
+  canonical-niche suggestions, invalid-key 401, invalid/mismatched-cursor 422 and
+  changed-page-size continuation with fixed expiry/no-store. Actual API process
+  restarts in both workflows preserved cursors. Recreating Docker API with a
+  different public test `CURSOR_SECRET` returned nonretryable `INVALID_CURSOR`
+  with recovery guidance; fresh search succeeded. Restore itself was not tested;
+  [mandatory restore/replacement rotation](#cursor-secret-operations) still applies.
+- **Failure/log safety:** stopping isolated PostgreSQL produced sanitized
+  retryable 500 through direct API and built proxy, not 401/empty success; recovery
+  worked. Stopping API produced Nginx 502, not SPA HTML. A ten-second client probe
+  timed out; a bounded 75-second allowance observed the upstream failure without
+  changing server/database deadlines. Effective `nginx -T` retained access-log
+  off/error-log discard. Captured API/Vite/Nginx/setup/ingest output contained no
+  public key, rejected-key/cursor sentinels or sampled real continuation tokens
+  across success, rejection and upstream failure. Nginx diagnostics remain
+  deliberately discarded, not recoverable or a v1 JSON envelope on upstream 502.
+- **Gates/cleanup:** all four root checks passed: 494 API unit, 437 real-PostgreSQL
+  and 65 web tests (996 total), no skips. Focused checks passed 95 cursor tests
+  for the ADR and 66 HTTP/PostgreSQL OpenAPI tests for the README examples.
+  Only this run's containers/networks/volumes were removed after inspecting
+  project labels and the dev-container identity;
+  developer services remained running. No application behavior, deadlines,
+  assertions, dependencies or user-owned documentation were changed.
+
+No production-scale benchmark, arbitrary mutation/multi-worker guarantee, browser
+E2E suite or 30-minute wall-clock expiry wait is claimed. Exact expiry/size,
+controlled commit races, live status semantics and OpenAPI agreement are covered
+by deterministic suites. Cursor rationale and operational limits are in
+[ADR-0002](docs/adr/0002-v1-cursor-visibility.md).
+
 ## Remaining work, in priority order
 
-1. **M2 final acceptance (#52):** review the completed slices and workflow results
-   with the human. `DESIGN.md` and `AI_NOTES.md` remain user-owned; they were not
-   created or modified by this verification.
-2. **M3 — v1 search:** strict discoverable filters, deterministic/null-last sorting,
-   stable cursor promises under ingest, shared UTC `days_active`, structured
-   errors and an OpenAPI regression contract. Preserve v0's intentional quirks.
-3. **M4 — keys and usage:** managed key lifecycle/scopes/revocation, shared
+1. **M3 final acceptance (#73):** human review of the implemented v1 contracts,
+   OpenAPI and isolated workflow results. `DESIGN.md` and `AI_NOTES.md` remain
+   user-owned and were not created or modified. Preserve v0's intentional quirks.
+2. **M4 — keys and usage:** managed key lifecycle/scopes/revocation, shared
    60-request/minute limits, exact/idempotent billing and the functional portal.
    Implement/test the [v0 429 exception](docs/adr/0001-v0-rate-limit-exception.md)
-   here, not in M2; quota enforcement remains a SHOULD requirement.
-4. **M5 — MCP and evaluation:** REST-backed tools consuming shared controls,
+   here, not in M3; quota enforcement remains a SHOULD requirement. No current v1
+   429 response or production-ready authentication is claimed.
+3. **M5 — MCP and evaluation:** REST-backed tools consuming shared controls,
    compact outputs and real-model/client evaluation with the required transcripts.
    Cross-brand impression comparisons remain unsupported by brand-local ranks.
