@@ -66,6 +66,42 @@ type ValidatedParameters = Omit<RawParameters, "niche" | "format" | "status" | "
 const nicheSlugs = niches.map(({ slug }) => slug);
 const sorts = ["newest", "impressions"] as const;
 
+type SearchParameters = { query: CursorQuery; limit: number; cursor: string | undefined };
+
+// Pass original only after authenticating/decoding the cursor; validation must run first.
+export function normalizeV1Parameters(
+  value: ValidatedParameters,
+  original?: CursorQuery,
+): ParameterResult<SearchParameters> {
+  const query: CursorQuery = {
+    q: value.q !== undefined ? value.q.trim() : (original?.q ?? ""),
+    niche: value.niche !== undefined ? [...new Set(value.niche)].sort() : [...(original?.niche ?? [])],
+    format: value.format ?? original?.format ?? null,
+    status: value.status ?? original?.status ?? null,
+    startedAfter: value.started_after ?? original?.startedAfter ?? null,
+    brandId: value.brand_id !== undefined ? Number(value.brand_id) : (original?.brandId ?? null),
+    sort: value.sort ?? original?.sort ?? "newest",
+  };
+  // Compare values, not object serialization/order. Omitted fields already inherit originals.
+  if (
+    original &&
+    (query.q !== original.q ||
+      query.niche.length !== original.niche.length ||
+      query.niche.some((slug, index) => slug !== original.niche[index]) ||
+      query.format !== original.format ||
+      query.status !== original.status ||
+      query.startedAfter !== original.startedAfter ||
+      query.brandId !== original.brandId ||
+      query.sort !== original.sort)
+  ) {
+    return { error: { code: "CURSOR_QUERY_MISMATCH", details: [] } };
+  }
+  if (query.sort === "impressions" && query.brandId === null) {
+    return invalid("brand_id", "required_for_impressions");
+  }
+  return { value: { query, limit: value.limit === undefined ? 20 : Number(value.limit), cursor: value.cursor } };
+}
+
 // Validation checks supplied values only. Defaults, conversions and deduplication come later.
 export function validateV1Parameters(raw: RawParameters): ParameterResult<ValidatedParameters> {
   const value: ValidatedParameters = {};
