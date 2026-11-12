@@ -282,16 +282,35 @@ guarantee; start a fresh search for a new complete set. Each response computes d
 from one current UTC time, not the first-page clock. Exhaustion does not subscribe
 to later changes.
 
-Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-search.test.ts tests/v1-pagination.test.ts`
-passes 37 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
+Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-pagination.test.ts tests/v1-visibility.test.ts tests/v1-search.test.ts`
+passes 56 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
 walks, rank 1/gaps/cross-brand equal ranks, many bytewise null IDs, known-to-null
 and all-null pages, size changes, in-flight/later known and null insertion
 exclusion, live deactivation and newly inactive positions, normalized continuation,
 replay, UTC rollover, fixed expiry, per-request authentication and sanitized
-no-store errors. Removing the null-only continuation guard makes the adversarial
-walk fail on duplicate IDs; restoring it passes. No query defect was exposed.
+no-store errors.
+
+The controlled-ingest proof runs real `runIngestTick` transactions with injected
+time/randomness. A test-only wrapper pauses after all writes but before commit;
+page one completes on another connection while that transaction is still open.
+A later transaction commits before the boundary, defeating a max-xid shortcut.
+Both sorts exhaust small/changing pages for active, inactive and unfiltered
+searches while further ticks insert current/backdated ads and deactivate old and
+post-boundary ads. Assertions check ordered, exact continuously eligible coverage,
+no repeated IDs and exclusion even after later inserts become inactive. Newly
+inactive rows have no completeness assertion. No process sleeps establish ordering.
+
+Replays read live fields, agree with v0/detail at the same UTC time/state across
+midnight, retain exact expiry and continue after recreating the HTTP app with an
+independent pool. PostgreSQL session checks find no retained transactions between
+requests; a real timed-out first-page query rolls back under the unchanged
+two-second query/connection deadlines and leaves the pool usable. Disabling the
+insertion-visibility predicate makes all six controlled walks fail; restoring it
+passes. Removing the null-only continuation guard also fails on duplicate IDs.
+No production correction was needed. The cursor unit suite passes 95 tests.
 Actual-process ingest smoke coverage and OpenAPI verification remain later M3
-work; these checks make no production-scale performance claim.
+work; HTTP app recreation is not an OS-process restart test. These checks make no
+production-scale performance claim.
 
 ### v1 ad detail
 

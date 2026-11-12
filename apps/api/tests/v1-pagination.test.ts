@@ -47,15 +47,16 @@ beforeAll(async () => {
   const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
   await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
   await connection.db.insert(brands).values({ id: brandId, name: "Pagination Brand" });
-  server = createApp({ db: connection.db, jwtSecret: "public-v1-pagination-jwt-secret-32-bytes" }).listen(
-    0,
-    "127.0.0.1",
-  );
+  await listen(connection.db);
+});
+
+async function listen(db: typeof connection.db) {
+  server = createApp({ db, jwtSecret: "public-v1-pagination-jwt-secret-32-bytes" }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   origin = `http://127.0.0.1:${address.port}`;
-});
+}
 
 afterAll(async () => {
   if (server)
@@ -122,6 +123,7 @@ async function expectError(response: Response, status: number, code: string) {
 // Random draws select exact old ads, never relying on UUID order or process waits.
 async function ingest(deactivate: string[], beforeCommit?: () => Promise<void>) {
   const time = new Date("2026-01-01T00:00:00Z");
+  const existingIds = new Set((await writer.db.select({ id: ads.id }).from(ads)).map((row) => row.id));
   const candidates = await writer.db
     .select({ id: ads.id })
     .from(ads)
@@ -158,6 +160,11 @@ async function ingest(deactivate: string[], beforeCommit?: () => Promise<void>) 
       },
     });
     expect(draws).toEqual([]);
+    const inserted = (await writer.db.select().from(ads).orderBy(ads.id)).filter((row) => !existingIds.has(row.id));
+    // A boundary callback may also insert the pre-B control row on another connection.
+    const generated = inserted.filter((row) => row.id.startsWith("ingest-ad-"));
+    expect(generated).toHaveLength(2);
+    return generated;
   } finally {
     barrier?.mockRestore();
   }
@@ -178,7 +185,7 @@ it.each(["newest", "impressions"].flatMap((sort) => ["", "active", "inactive"].m
     const query = `brand_id=${brandId}&sort=${sort}${status ? `&status=${status}` : ""}`;
     let initial: string[] = [];
     let first: Awaited<ReturnType<typeof page>> | undefined;
-    await ingest(["Z"], async () => {
+    const inFlight = await ingest(["Z"], async () => {
       // Advance xmax beyond the open tick: a simple max-xid fence would fail.
       await connection.db.insert(ads).values(ad("boundary", 8));
       initial = (await page(query)).data.map((row: { id: string }) => row.id);
@@ -186,21 +193,22 @@ it.each(["newest", "impressions"].flatMap((sort) => ["", "active", "inactive"].m
       expect(first.data.map((row: { id: string }) => row.id)).toEqual([initial[0]]);
     });
     if (!first) throw new Error("First-page synchronization did not execute");
-    await ingest(["c"]);
+    const later = await ingest(["c"]);
+    let targets = [inFlight[0].id, later[0].id];
     const seen: string[] = first.data.map((row: { id: string }) => row.id);
     let cursor = first.next_cursor;
     let index = 0;
     while (cursor) {
-      // Deactivate a post-B insert too; inactive/unfiltered walks must still exclude it.
-      const inserted = await writer.db.select().from(ads).where(eq(ads.status, "active")).orderBy(ads.id);
-      const target = inserted.find((row) => row.id.startsWith("ingest-ad-"));
-      if (!target) throw new Error("Expected active tick insert");
-      await ingest([target.id]);
+      // First target both an in-flight-at-B insert and a later insert, then each tick's
+      // generated pair. UUID ordering cannot accidentally omit either provenance case.
+      const generated = await ingest(targets);
+      targets = generated.map((row) => row.id);
       const next = await page(continuation(cursor, { limit: String(1 + (index++ % 2)), brand_id: `0${brandId}` }));
       expect(next.applied_filters).toEqual(first.applied_filters);
       expect(next.cursor_expires_at).toBe(first.cursor_expires_at);
       expect(next.sort).toBe(sort);
       expect(next.data.length).toBeGreaterThan(0);
+      expect(next.data.some((row: { id: string }) => row.id.startsWith("ingest-ad-"))).toBe(false);
       seen.push(...next.data.map((row: { id: string }) => row.id));
       expect(new Set(seen).size).toBe(seen.length);
       expect(index).toBeLessThan(12);
@@ -218,7 +226,9 @@ it.each(["newest", "impressions"].flatMap((sort) => ["", "active", "inactive"].m
     expect(postBoundary.some((row) => row.startDate === "2025-12-31")).toBe(true);
     expect(postBoundary.some((row) => row.startDate === "2026-01-01")).toBe(true);
     expect(postBoundary.every((row) => row.discoveredAt.toISOString() === "2026-01-01T00:00:00.000Z")).toBe(true);
-    expect(postBoundary.some((row) => row.status === "inactive")).toBe(true);
+    for (const id of [inFlight[0].id, later[0].id]) {
+      expect(postBoundary.find((row) => row.id === id)?.status).toBe("inactive");
+    }
   },
 );
 
@@ -352,6 +362,8 @@ it.each(["newest", "impressions"])(
     const query = `brand_id=${brandId}&sort=${sort}&limit=1`;
     const active = await page(`${query}&status=active`);
     const all = await page(query);
+    const before = await page(continuation(all.next_cursor));
+    expect(before.data.map((row: { status: string }) => row.status)).toEqual(["active", "active", "active"]);
     for (const id of ["Z", "a"]) {
       await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" }).where(eq(ads.id, id));
     }
@@ -360,6 +372,8 @@ it.each(["newest", "impressions"])(
     const allRest = await page(continuation(all.next_cursor));
     expect(allRest.data.map((row: { id: string }) => row.id)).toEqual(["Z", "a", "z"]);
     expect(allRest.data[0]).toMatchObject({ status: "inactive", days_active: 2 });
+    expect(allRest.cursor_expires_at).toBe(before.cursor_expires_at);
+    expect(allRest.data.map((row: { id: string }) => row.id)).toEqual(before.data.map((row: { id: string }) => row.id));
     // If every unread ad becomes ineligible, exhaustion is an empty successful page.
     await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" });
     expect(await page(continuation(active.next_cursor))).toMatchObject({
@@ -371,26 +385,26 @@ it.each(["newest", "impressions"])(
   },
 );
 
-it("observes newly inactive ranks and nulls only ahead of the impressions position", async () => {
+it.each(["newest", "impressions"])("observes newly inactive rows only ahead of the %s position", async (sort) => {
   for (const id of ["Z", "z"]) {
     await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" }).where(eq(ads.id, id));
   }
-  const first = await page(`sort=impressions&brand_id=${brandId}&status=inactive&limit=1`);
+  const first = await page(`sort=${sort}&brand_id=${brandId}&status=inactive&limit=1`);
   expect(first.data.map((row: { id: string }) => row.id)).toEqual(["Z"]);
   expect(first.next_cursor).toEqual(expect.any(String));
-  // A is behind the known position; a becomes eligible ahead of it.
+  // A is behind the position; a becomes eligible ahead of it.
   for (const id of ["A", "a"]) {
     await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" }).where(eq(ads.id, id));
   }
   const second = await page(continuation(first.next_cursor, { limit: "1" }));
   expect(second.data).toEqual([expect.objectContaining({ id: "a", status: "inactive", days_active: 2 })]);
-  // Deactivation behind the null position must not bring a known rank back.
+  // A behind the position must not return, even after reaching the null ranks.
   const final = await page(continuation(second.next_cursor, { limit: "1" }));
   expect(final.data.map((row: { id: string }) => row.id)).toEqual(["z"]);
   expect(final.next_cursor).toBeNull();
   expect(final.applied_filters).toEqual(first.applied_filters);
   expect(final.cursor_expires_at).toBe(first.cursor_expires_at);
-  const fresh = await page(`sort=impressions&brand_id=${brandId}&status=inactive`);
+  const fresh = await page(`sort=${sort}&brand_id=${brandId}&status=inactive`);
   expect(fresh.data.map((row: { id: string }) => row.id)).toEqual(["A", "Z", "a", "z"]);
 });
 
@@ -419,6 +433,46 @@ it.each(["newest", "impressions"])("replays tokens with fixed expiry at the exac
   }
 });
 
+it.each(["newest", "impressions"])(
+  "agrees with v0/detail at equal state and time across UTC midnight: %s",
+  async (sort) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-01-02T23:59:59.999Z"));
+      const first = await page(`sort=${sort}&brand_id=${brandId}&limit=1`);
+      const before = await page(continuation(first.next_cursor));
+      expect(before.data.map((row: { days_active: number }) => row.days_active)).toEqual([1, 1, 1]);
+      await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-02" }).where(eq(ads.id, "a"));
+      for (const time of ["2026-01-02T23:59:59.999Z", "2026-01-03T00:00:00.000Z"]) {
+        vi.setSystemTime(new Date(time));
+        const current = await page(continuation(first.next_cursor));
+        expect(current.cursor_expires_at).toBe(first.cursor_expires_at);
+        const legacyResponse = await fetch(`${origin}/api/v0/ads?api_key=${key}&q=Serum`);
+        expect(legacyResponse.status).toBe(200);
+        const legacy = await legacyResponse.json();
+        for (const row of current.data) {
+          const detailResponse = await fetch(`${origin}/api/v1/ads/${row.id}`, {
+            headers: { Authorization: `Bearer ${key}` },
+          });
+          expect(detailResponse.status).toBe(200);
+          const detail = await detailResponse.json();
+          const expectedDays = row.id === "a" || time.startsWith("2026-01-02") ? 1 : 2;
+          expect(row.days_active).toBe(expectedDays);
+          expect(detail.data).toMatchObject(row);
+          expect(detail.data.end_date).toBe(row.id === "a" ? "2026-01-02" : null);
+          expect(legacy.data.find((ad: { id: string }) => ad.id === row.id)).toMatchObject({
+            id: row.id,
+            status: row.status,
+            days_active: expectedDays,
+          });
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
 it.each(["newest", "impressions"])("authenticates every continuation before validation: %s", async (sort) => {
   const first = await page(`sort=${sort}&brand_id=${brandId}&limit=1`);
   await expectError(await request("cursor=invalid&limit=no", null), 401, "UNAUTHENTICATED");
@@ -437,6 +491,40 @@ it.each(["newest", "impressions"])("authenticates every continuation before vali
       .where(eq(apiKeys.keyHash, hashApiKey(`${key}-changed`)));
   }
 });
+
+it.each(["newest", "impressions"])(
+  "replays after restarting the HTTP app with an independent pool: %s",
+  async (sort) => {
+    const first = await page(`sort=${sort}&brand_id=${brandId}&limit=1`);
+    const expected = await page(continuation(first.next_cursor, { limit: "1" }));
+    expect(connection.db.$client.idleCount).toBe(connection.db.$client.totalCount);
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    const restarted = createDatabase(url.href);
+    try {
+      await listen(restarted.db);
+      const replay = await page(continuation(first.next_cursor, { limit: "1", sort }));
+      expect(replay).toMatchObject({
+        data: expected.data,
+        applied_filters: first.applied_filters,
+        cursor_expires_at: first.cursor_expires_at,
+        sort,
+      });
+      const final = await page(continuation(replay.next_cursor));
+      expect(final.data.map((row: { id: string }) => row.id)).toEqual(["a", "z"]);
+      expect(final.next_cursor).toBeNull();
+      expect(final.cursor_expires_at).toBe(first.cursor_expires_at);
+      expect(restarted.db.$client.idleCount).toBe(restarted.db.$client.totalCount);
+      const sessions = await writer.db.execute(sql`SELECT state, xact_start FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid()`);
+      expect(sessions.rows.length).toBeGreaterThan(0);
+      for (const session of sessions.rows) expect(session).toMatchObject({ state: "idle", xact_start: null });
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+      await restarted.close();
+      await listen(connection.db);
+    }
+  },
+);
 
 it.each(["newest", "impressions"])("sanitizes no-store cursor and database errors: %s", async (sort) => {
   const first = await page(`sort=${sort}&brand_id=${brandId}&limit=1`);

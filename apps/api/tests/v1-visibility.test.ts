@@ -79,6 +79,26 @@ it("rejects writes and releases the transaction on failure", async () => {
   await db.insert(ads).values(ad("after-failure"));
 });
 
+it("retains two-second query/connection deadlines and releases a timed-out first-page transaction", async () => {
+  expect(db.$client.options).toMatchObject({
+    connectionTimeoutMillis: 2000,
+    statement_timeout: 2000,
+    query_timeout: 2000,
+  });
+  const settings = await db.execute(sql`SELECT current_setting('statement_timeout') AS timeout`);
+  expect(settings.rows).toEqual([{ timeout: "2s" }]);
+  await expect(readFirstPage(db, (tx) => tx.execute(sql`SELECT pg_sleep(3)`))).rejects.toMatchObject({
+    cause: { message: expect.stringMatching(/statement timeout|Query read timeout/) },
+  });
+  expect(db.$client.idleCount).toBe(db.$client.totalCount);
+  // Rollback completed and the same pool remains usable with no open transaction.
+  await db.insert(ads).values(ad("after-timeout"));
+  const sessions = await writer.db.execute(sql`SELECT state, xact_start FROM pg_stat_activity
+    WHERE datname = current_database() AND pid <> pg_backend_pid()`);
+  expect(sessions.rows.length).toBeGreaterThan(0);
+  for (const session of sessions.rows) expect(session).toMatchObject({ state: "idle", xact_start: null });
+});
+
 it.each(["2025-01-01T00:00:00.000Z", discoveredAt.toISOString()])(
   "excludes an insert in flight at B, even from a savepoint with discovery time %s",
   async (time) => {
