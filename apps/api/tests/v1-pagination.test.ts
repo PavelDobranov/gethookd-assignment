@@ -117,6 +117,64 @@ async function expectError(response: Response, status: number, code: string) {
   return body;
 }
 
+it.each([false, true])("walks adversarial brand-local ranks and bytewise null IDs (all-null=%s)", async (allNull) => {
+  await connection.db.delete(ads);
+  const nullIds = ["!", "0", "A", "Z", "a", "z", "é", "Ω", "😀"];
+  const known = allNull ? [] : [ad("rank-z", 1), ad("rank-a", 4), ad("rank-0", 2147483647)];
+  await connection.db.insert(ads).values([...nullIds.map((id) => ad(id)).reverse(), ...[...known].reverse()]);
+  // The same known ranks are legal in another brand, but never comparable.
+  await connection.db
+    .insert(brands)
+    .values({ id: brandId + 1, name: "Other Rank Brand" })
+    .onConflictDoNothing();
+  await connection.db.insert(ads).values([
+    { ...ad("other-first", 1), brandId: brandId + 1 },
+    { ...ad("other-gap", 4), brandId: brandId + 1 },
+    { ...ad("other-null"), brandId: brandId + 1 },
+  ]);
+  const first = await page(`sort=impressions&brand_id=0${brandId}&q=%20Serum%20&niche=skincare&niche=skincare&limit=1`);
+  expect(first.applied_filters).toEqual({
+    q: "Serum",
+    niche: ["skincare"],
+    format: null,
+    status: null,
+    started_after: null,
+    brand_id: brandId,
+  });
+  expect(first.data[0]).toMatchObject({ id: allNull ? "!" : "rank-z", impression_rank: allNull ? null : 1 });
+  const seen = first.data.map((row: { id: string }) => row.id);
+  const ranks = first.data.map((row: { impression_rank: number | null }) => row.impression_rank);
+  const expected = [...known.map((row) => row.id), ...nullIds];
+  let cursor = first.next_cursor;
+  let index = 0;
+  while (cursor) {
+    // End a page exactly at the last known rank, then traverse several null-only pages.
+    const limit = index++ === 0 ? "2" : "1";
+    const next = await page(continuation(cursor, { limit, brand_id: `${brandId}` }));
+    expect(next.sort).toBe("impressions");
+    expect(next.limit).toBe(Number(limit));
+    expect(next.applied_filters).toEqual(first.applied_filters);
+    expect(next.cursor_expires_at).toBe(first.cursor_expires_at);
+    expect(next.data.length).toBeGreaterThan(0);
+    expect(next.data.every((row: { brand_id: number }) => row.brand_id === brandId)).toBe(true);
+    seen.push(...next.data.map((row: { id: string }) => row.id));
+    ranks.push(...next.data.map((row: { impression_rank: number | null }) => row.impression_rank));
+    expect(seen.length).toBeLessThanOrEqual(expected.length);
+    expect(new Set(seen).size).toBe(seen.length);
+    cursor = next.next_cursor;
+  }
+  expect(seen).toEqual(expected);
+  expect(ranks).toEqual([...known.map((row) => row.impressionRank), ...nullIds.map(() => null)]);
+  const other = await page(`sort=impressions&brand_id=${brandId + 1}`);
+  expect(other.data.map((row: { id: string }) => row.id)).toEqual(["other-first", "other-gap", "other-null"]);
+  expect(await page("sort=impressions&brand_id=2147483647")).toMatchObject({
+    data: [],
+    next_cursor: null,
+    sort: "impressions",
+    applied_filters: { brand_id: 2147483647 },
+  });
+});
+
 it.each(["newest", "impressions"])(
   "inherits normalized filters and permits partial equivalent repeats and size changes: %s",
   async (sort) => {
