@@ -3,11 +3,22 @@ import { promisify } from "node:util";
 import { eq, sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  expect,
+  inject,
+  it,
+  vi,
+} from "vitest";
+import { hashApiKey, validateApiKey } from "../src/api-keys/index.js";
 import { hashPassword, verifyPassword } from "../src/auth/password.js";
 import { createDatabase } from "../src/db/client.js";
-import { users } from "../src/db/schema.js";
-import { seedDemoUser } from "../src/db/seed.js";
+import { generateFixtures } from "../src/db/fixtures.js";
+import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import { seedDatabase, seedDemoUser } from "../src/db/seed.js";
+import { seedWorld } from "../src/db/seed-world.js";
 
 // A separate database keeps this suite independent of the empty-DB migration tests.
 const admin = createDatabase(inject("postgresUrl"));
@@ -27,7 +38,8 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(users);
+  // Only this suite's database in the disposable test project is touched.
+  await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
 });
 afterAll(close);
 
@@ -177,3 +189,125 @@ it("preserves deliberately changed demo credentials and unrelated users", async 
     false,
   );
 });
+
+it("seeds the complete world and a hash-only key owned by the existing demo user", async () => {
+  await db
+    .insert(users)
+    .values({ username: "demo", passwordHash: "existing-hash" });
+  const [demo] = await db.select().from(users);
+  const batchTimings: number[] = [];
+  const client = await db.$client.connect();
+  const originalQuery = client.query;
+  const query = vi.spyOn(client, "query").mockImplementation(
+    new Proxy(originalQuery, {
+      apply(target, receiver, args) {
+        const started = performance.now();
+        const result = Reflect.apply(target, receiver, args);
+        if (args[0]?.text?.startsWith('insert into "ads"')) {
+          return result.finally(() =>
+            batchTimings.push(performance.now() - started),
+          );
+        }
+        return result;
+      },
+    }),
+  );
+  client.release();
+  try {
+    await seedDatabase(db);
+  } finally {
+    query.mockRestore();
+  }
+  expect(batchTimings).toHaveLength(40);
+  console.info(
+    `[seed] 40 batches of 500 ads: total SQL ${batchTimings.reduce((sum, ms) => sum + ms, 0).toFixed(0)}ms, slowest ${Math.max(...batchTimings).toFixed(0)}ms`,
+  );
+  expect((await db.select().from(brands)).length).toBe(300);
+  expect((await db.select().from(ads)).length).toBe(20_000);
+  expect(await validateApiKey(db, "gethookd-public-demo-api-key-m2")).toEqual({
+    userId: demo.id,
+  });
+  expect(await db.select().from(apiKeys)).toEqual([
+    {
+      id: expect.any(String),
+      userId: demo.id,
+      keyHash: hashApiKey("gethookd-public-demo-api-key-m2"),
+    },
+  ]);
+  expect(
+    JSON.stringify(await db.select().from(users)) === JSON.stringify([demo]),
+  ).toBe(true);
+});
+
+it("preserves changed world rows and keys while restoring missing fixture IDs on repeat seed", async () => {
+  await seedDatabase(db);
+  const fixtures = generateFixtures();
+  const first = fixtures.ads[0];
+  const missing = fixtures.ads[1];
+  await db
+    .update(brands)
+    .set({ name: "Changed brand" })
+    .where(eq(brands.id, first.brandId));
+  await db
+    .update(ads)
+    .set({ headline: "Changed headline", impressionRank: 999 })
+    .where(eq(ads.id, first.id));
+  await db.delete(ads).where(eq(ads.id, missing.id));
+  await db.delete(ads).where(eq(ads.brandId, 300));
+  await db.delete(brands).where(eq(brands.id, 300));
+  const [changed] = await db.select().from(ads).where(eq(ads.id, first.id));
+  const keysBefore = await db.select().from(apiKeys);
+  await seedDatabase(db);
+  expect(await db.select().from(ads).where(eq(ads.id, first.id))).toEqual([
+    changed,
+  ]);
+  expect(await db.select().from(ads).where(eq(ads.id, missing.id))).toEqual([
+    missing,
+  ]);
+  expect(
+    await db.select().from(brands).where(eq(brands.id, first.brandId)),
+  ).toEqual([{ id: first.brandId, name: "Changed brand" }]);
+  expect(await db.select().from(brands).where(eq(brands.id, 300))).toEqual([
+    fixtures.brands[299],
+  ]);
+  expect(await db.select().from(apiKeys)).toEqual(keysBefore);
+  expect((await db.select().from(ads)).length).toBe(20_000);
+});
+
+it("repairs an occupied missing-fixture rank above both existing and full-fixture maxima", async () => {
+  const fixtures = generateFixtures();
+  const ranked = fixtures.ads.find((ad) => ad.impressionRank !== null);
+  if (!ranked || ranked.impressionRank === null)
+    throw new Error("Expected ranked fixture");
+  const occupied = { ...ranked, id: "ingest-shaped-ad" };
+  await db.insert(brands).values(fixtures.brands);
+  await db.insert(ads).values(occupied);
+  await seedDatabase(db);
+  const [repaired] = await db.select().from(ads).where(eq(ads.id, ranked.id));
+  const maximum = Math.max(
+    ...fixtures.ads
+      .filter((ad) => ad.brandId === ranked.brandId)
+      .map((ad) => ad.impressionRank ?? 0),
+  );
+  expect(repaired.impressionRank).toBe(maximum + 1);
+  expect(await db.select().from(ads).where(eq(ads.id, occupied.id))).toEqual([
+    occupied,
+  ]);
+  await seedDatabase(db);
+  expect(await db.select().from(ads).where(eq(ads.id, ranked.id))).toEqual([
+    repaired,
+  ]);
+});
+
+it.each([null, "US", ["US", "XX"], ["us"], [42]])(
+  "rejects invalid country arrays before world persistence (case %#)",
+  async (countries) => {
+    const fixtures = generateFixtures();
+    Object.assign(fixtures.ads[0], { countries });
+    await expect(
+      db.transaction((tx) => seedWorld(tx, fixtures)),
+    ).rejects.toThrow("Invalid fixture countries.");
+    expect(await db.select().from(brands)).toEqual([]);
+    expect(await db.select().from(ads)).toEqual([]);
+  },
+);

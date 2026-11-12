@@ -333,7 +333,13 @@ under different clocks, exact distributions, keywords and per-record invariants.
 The generator does not write to PostgreSQL. The storage schema below is available;
 integration of fixtures with setup/seed, v0 HTTP authentication and live ingest
 remain separate pending slices. Setup and `db:seed` currently seed
-only the demo user.
+only the demo user. The shared `seedDatabase(db)` operation is available for
+transactional world persistence; command/initializer integration is separate.
+It validates fixture country arrays, inserts missing brands/ads in batches of 500,
+and stores the public key's hash against the actual demo user. Existing rows are
+never updated. Missing known-rank fixtures retain a free desired rank, or receive
+a deterministic fallback above both stored and full-fixture maxima; rank
+exhaustion fails and rolls back rather than renumbering or dropping fixtures.
 
 ## Ad and API-key storage
 
