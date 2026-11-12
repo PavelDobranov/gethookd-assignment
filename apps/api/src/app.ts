@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 
+import { createAdsRouter } from "./ads/router.js";
 import { createAuthRouter } from "./auth/index.js";
 import type { createDatabase } from "./db/client.js";
 import { createHealthRouter } from "./health/router.js";
@@ -16,6 +17,8 @@ export function createApp({ db, jwtSecret }: AppDependencies): Express {
   app.use("/api/health", createHealthRouter({ db }));
 
   app.use("/api/auth", createAuthRouter({ db, jwtSecret }));
+
+  app.use("/api/v0", createAdsRouter({ db }));
 
   app.use(handleErrors);
 

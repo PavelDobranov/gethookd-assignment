@@ -388,14 +388,28 @@ and stores the public key's hash against the actual demo user. Existing rows are
 never updated. Missing known-rank fixtures retain a free desired rank, or receive
 a deterministic fallback above both stored and full-fixture maxima; rank
 exhaustion fails and rolls back rather than renumbering or dropping fixtures.
-v0 HTTP authentication and live ingest remain separate pending slices.
+v0 HTTP authentication uses the stored hash on every request; live ingest remains
+a separate pending slice.
 
 ## Legacy v0 parameter contract
 
-`apps/api/src/ads/parameters.ts` provides `parseAdParameters(URLSearchParams)`;
-HTTP routing and database-backed authentication are separate pending slices.
-The parser returns typed values or `null` for the router's generic HTTP 400
-`{"error":"Invalid request"}` policy, without logging inputs or authenticating keys.
+`GET /api/v0/ads?api_key=gethookd-public-demo-api-key-m2` serves the legacy
+contract. `apps/api/src/ads/router.ts` uses the raw query parser in `parameters.ts`
+and validates the supplied key against PostgreSQL on every request; portal JWTs
+cannot substitute. Responses are not cached. All v0 failures, including database
+failures, return exactly HTTP 400 `{"error":"Invalid request"}` locally, without
+changing portal/health errors or logging raw errors, keys or request URLs.
+
+Success is `{"data":[...],"page":1,"total":123}`. Each ad contains only string
+`id`, brand name `brand`, `headline`, niche display name `niche`, `format`,
+`status`, `start_date` (`YYYY-MM-DD`) and integer `days_active`. Days use the
+actual current UTC day for active ads and the end date for inactive ads, not the
+seed reference date. `total` counts all filtered ads before pagination; beyond-end
+pages return empty data and the requested page. SQL orders only by
+`start_date DESC`, without a tiebreaker or snapshot guarantee. Live changes and
+ties can produce duplicates/gaps across offset pages; this is intentional v0
+behavior. Headline/body search uses bound parameters and escapes `%`, `_` and
+backslash as literals, never wildcard or SQL syntax.
 
 Only exact names `q`, `niche`, `format`, `status`, `page`, `per_page`, and
 `api_key` are recognized. Repeating any recognized name fails, even with empty
@@ -441,7 +455,7 @@ required `key_hash`; no plaintext or lifecycle metadata is stored. Foreign keys
 prevent deletion of a referenced brand/user rather than silently removing ads/keys.
 The migration provides storage; the stored-key operations below provide hashing
 and validation. The shared seed inserts the public development key's hash;
-HTTP authentication is not wired yet.
+v0 HTTP authentication uses the stored-key operations below.
 
 ```sh
 npm run test:integration -w @gethookd/api -- tests/db.test.ts tests/world-model.test.ts
@@ -470,7 +484,8 @@ The public development fixture is **`gethookd-public-demo-api-key-m2`**, whose
 SHA-256 digest is
 `58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47`.
 It is public, development-only, and not a production secret. Setup and `db:seed`
-insert its hash if missing; no API-key HTTP endpoint is available. Future managed
+insert its hash if missing; the key authenticates `GET /api/v0/ads`. No key
+management HTTP endpoint is available. Future managed
 keys require cryptographically random secrets; these operations add no key management,
 scopes, rate limits or metering.
 
