@@ -9,6 +9,7 @@ import { createDatabase } from "../src/db/client.js";
 import { generateFixtures } from "../src/db/fixtures.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
 import { seedDatabase } from "../src/db/seed.js";
+import { seedWorld } from "../src/db/seed-world.js";
 
 // Both databases belong exclusively to the disposable PostgreSQL test server.
 const postgresUrl = inject("postgresUrl");
@@ -21,6 +22,12 @@ const connections = ["gethookd_world_seed_a", "gethookd_world_seed_b"].map(
 );
 const [first, second] = connections;
 const run = promisify(execFile);
+
+function highestRankedFixture() {
+  return generateFixtures()
+    .ads.filter((ad) => ad.brandId === 1 && ad.impressionRank !== null)
+    .sort((a, b) => (b.impressionRank ?? 0) - (a.impressionRank ?? 0))[0];
+}
 
 // PostgreSQL text retains complete records (including timestamp microseconds).
 // Assertions compare booleans so stored credential hashes cannot enter failure logs.
@@ -147,9 +154,7 @@ it("preserves all evolved records through initialization and seed while restorin
   const { db } = first;
   await seedDatabase(db);
   const fixtures = generateFixtures();
-  const ranked = fixtures.ads
-    .filter((ad) => ad.brandId === 1 && ad.impressionRank !== null)
-    .sort((a, b) => (b.impressionRank ?? 0) - (a.impressionRank ?? 0))[0];
+  const ranked = highestRankedFixture();
   const nullRanked = fixtures.ads.find(
     (ad) => ad.brandId === 1 && ad.impressionRank === null,
   );
@@ -245,3 +250,85 @@ it("preserves all evolved records through initialization and seed while restorin
     true,
   );
 }, 20000);
+
+it("rolls back earlier world batches and brand inserts on an unexpected uniqueness conflict", async () => {
+  const { db } = first;
+  const fixtures = generateFixtures();
+  await db.insert(brands).values(fixtures.brands[0]);
+  await db.insert(ads).values(fixtures.ads[0]);
+  // More than one 500-ad batch is missing; fail only in the final batch.
+  const missing = {
+    brands: fixtures.brands.filter((brand) => brand.id >= 290),
+    ads: fixtures.ads.filter((ad) => ad.brandId >= 290),
+  };
+  expect(missing.ads.length).toBeGreaterThan(500);
+  const before = await readRecords();
+  await db.execute(sql`CREATE FUNCTION collide_world_id() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN NEW.id := 'seed-ad-000001'; RETURN NEW; END $$`);
+  await db.execute(sql`CREATE TRIGGER collide_world_id BEFORE INSERT ON ads
+    FOR EACH ROW WHEN (NEW.id = 'seed-ad-019800') EXECUTE FUNCTION collide_world_id()`);
+  try {
+    await expect(
+      db.transaction((tx) => seedWorld(tx, missing)),
+    ).rejects.toThrow();
+    expect(JSON.stringify(await readRecords()) === JSON.stringify(before)).toBe(
+      true,
+    );
+  } finally {
+    await db.execute(sql`DROP TRIGGER collide_world_id ON ads`);
+    await db.execute(sql`DROP FUNCTION collide_world_id()`);
+  }
+}, 20000);
+
+it.each([2_147_483_646, 2_147_483_647])(
+  "repairs up to the integer rank limit, but fails with full rollback beyond it (existing maximum %i)",
+  async (maximum) => {
+    const { db } = first;
+    const fixtures = generateFixtures();
+    const world = {
+      brands: fixtures.brands.filter(
+        (brand) => brand.id === 1 || brand.id === 300,
+      ),
+      ads: fixtures.ads.filter((ad) => ad.brandId === 1 || ad.brandId === 300),
+    };
+    const seed = () => db.transaction((tx) => seedWorld(tx, world));
+    await seed();
+    const ranked = highestRankedFixture();
+    await db.delete(ads).where(eq(ads.id, ranked.id));
+    await db.insert(ads).values([
+      { ...ranked, id: "ingest-ad-occupying-desired-rank" },
+      { ...ranked, id: "ingest-ad-at-column-limit", impressionRank: maximum },
+    ]);
+    if (maximum === 2_147_483_647) {
+      // Brands are inserted before rank allocation: exhaustion must undo them too.
+      await db.delete(ads).where(eq(ads.brandId, 300));
+      await db.delete(brands).where(eq(brands.id, 300));
+    }
+    const before = await readRecords();
+    if (maximum === 2_147_483_647) {
+      await expect(seed()).rejects.toThrow("Fixture rank space exhausted.");
+      expect(
+        JSON.stringify(await readRecords()) === JSON.stringify(before),
+      ).toBe(true);
+    } else {
+      await seed();
+      const [repaired] = await db
+        .select()
+        .from(ads)
+        .where(eq(ads.id, ranked.id));
+      expect(repaired).toEqual({ ...ranked, impressionRank: 2_147_483_647 });
+      const after = await readRecords();
+      expect(after.length).toBe(before.length + 1);
+      expect(
+        JSON.stringify(
+          after.filter((row) => !(row.table === "ads" && row.id === ranked.id)),
+        ) === JSON.stringify(before),
+      ).toBe(true);
+      await seed();
+      expect(
+        JSON.stringify(await readRecords()) === JSON.stringify(after),
+      ).toBe(true);
+    }
+  },
+  20000,
+);

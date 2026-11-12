@@ -211,8 +211,11 @@ imported by the web app.
 `npm test` requires API unit tests, a separate PostgreSQL integration run, and web
 component tests. Each command must collect tests and succeed; missing Docker,
 failed provisioning, readiness timeout, and empty/failing suites are errors, never
-skips. Use `npm run test:unit -w @gethookd/api -- tests/password.test.ts` to focus
-a unit file without provisioning PostgreSQL.
+skips. PostgreSQL suites run one file at a time to avoid contention between real
+scrypt hashing and seed persistence on the shared test server; all tests and
+deadlines remain in force. Use
+`npm run test:unit -w @gethookd/api -- tests/password.test.ts` to focus a unit file
+without provisioning PostgreSQL.
 
 Integration global setup uses **only `compose.test.yaml`**, a random
 `gethookd-test-<UUID>` Compose project, an isolated labeled volume/network, and a
@@ -305,7 +308,23 @@ password therefore stops working if someone deliberately changes it.
 
 ```sh
 npm run test:integration -w @gethookd/api -- tests/seed.test.ts tests/db.test.ts
+npm run test:integration -w @gethookd/api -- tests/world-seed.test.ts tests/seed.test.ts
 ```
+
+`world-seed.test.ts` compares complete ordered brand/ad records from two fresh,
+independently migrated and seeded databases, including discovery timestamps,
+with exact counts/distributions, keywords and per-record invariants. Salted user
+hashes and generated key UUIDs are intentionally excluded from fresh-world equality.
+Repeat initialization and seeding preserve evolved credentials, key owners/IDs,
+modified/deactivated/backdated ads and unrelated records. PostgreSQL record-text
+comparisons retain timestamp microseconds. Deleting a highest-ranked fixture and
+inserting an ingest-shaped row at that rank restores the missing fixture above
+the brand's maximum without changing existing rows; another seed is a no-op.
+A late-batch uniqueness conflict proves world/brand rollback rather than silent
+conflict-skipping. Rank repair can reach `2147483647`; exhaustion beyond that
+PostgreSQL integer limit fails with full rollback, never wrapping or using null.
+These fixtures simulate ingest; preservation after actual ingest remains a later
+runtime check.
 
 Tests use a separate database inside the disposable PostgreSQL project, covering
 empty/repeated seeding, changed credentials/world rows, missing fixtures, occupied

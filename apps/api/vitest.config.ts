@@ -23,6 +23,8 @@ export default defineConfig({
       {
         test: {
           name: "postgres",
+          // Real scrypt/seed suites share the test server; keep deadlines isolated.
+          fileParallelism: false,
           include: [
             "tests/api-keys.test.ts",
             "tests/health.test.ts",
