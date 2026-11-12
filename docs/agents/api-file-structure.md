@@ -1,5 +1,14 @@
 API structure — illustrative, not mandatory scaffolding. Create only what is needed.
 
+Optimize for the human maintainer's ability to understand and modify code—not
+minimum line count, file count, or additional architectural layers.
+Prefer direct Drizzle access in business operations. Introduce additional
+persistence abstractions only for a concrete need, not architectural symmetry.
+
+Keep route registration together at the bottom, using named handlers. Prefer
+handlers outside the router factory; dependency-bound handlers may use small
+factories.
+
 apps/api/
   src/
     app.ts                    # Application composition and route mounting
