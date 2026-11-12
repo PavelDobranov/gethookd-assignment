@@ -1,8 +1,18 @@
+import { once } from "node:events";
 import { readFileSync } from "node:fs";
+import type { Server } from "node:http";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { expect, it } from "vitest";
+import { eq, sql } from "drizzle-orm";
+import { afterAll, beforeAll, expect, inject, it, vi } from "vitest";
 import { parse } from "yaml";
+
+import { niches } from "../src/ads/model.js";
+import { hashApiKey } from "../src/api-keys/index.js";
+import { createApp } from "../src/app.js";
+import { createDatabase } from "../src/db/client.js";
+import { initializeDatabase } from "../src/db/initialize.js";
+import { ads, apiKeys, brands, users } from "../src/db/schema.js";
 
 type Schema = Record<string, unknown>;
 type Parameter = {
@@ -56,6 +66,189 @@ function validators(document: Contract) {
 
 const validate = validators(contract);
 const paths = ["/api/v1/ads", "/api/v1/ads/{id}", "/api/v1/niches"];
+const url = new URL(inject("postgresUrl"));
+url.pathname = "/gethookd_v1_openapi_test";
+const connection = createDatabase(url.href);
+const key = "public-v1-openapi-test-key";
+const brandId = 94001;
+let server: Server;
+let origin: string;
+
+beforeAll(async () => {
+  const admin = createDatabase(inject("postgresUrl"));
+  try {
+    await admin.db.execute(sql`CREATE DATABASE gethookd_v1_openapi_test`);
+  } finally {
+    await admin.close();
+  }
+  await initializeDatabase(url.href);
+  await connection.db.delete(ads);
+  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
+  await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
+  await connection.db.insert(brands).values([
+    { id: brandId, name: "Contract Brand" },
+    { id: brandId + 1, name: "Other Brand" },
+  ]);
+  const base = {
+    brandId,
+    headline: "SERUM 50%_\\ off",
+    bodyText: "Ordinary body",
+    niche: "skincare" as const,
+    format: "video" as const,
+    status: "active" as const,
+    startDate: "2026-01-02",
+    endDate: null,
+    impressionRank: null,
+    countries: ["US"],
+    discoveredAt: new Date("2026-01-01T00:00:00Z"),
+  };
+  await connection.db.insert(ads).values([
+    { ...base, id: "A", impressionRank: 1 },
+    { ...base, id: "B", headline: "Other", bodyText: "Try sErUm", impressionRank: 3 },
+    { ...base, id: "C", niche: "haircare", format: "image", startDate: "2026-01-01" },
+    { ...base, id: "D", status: "inactive", endDate: "2026-01-04", startDate: "2026-01-01" },
+    { ...base, id: "opaque /é", brandId: brandId + 1, niche: "fitness", headline: "Unrelated" },
+  ]);
+  server = createApp({ db: connection.db, jwtSecret: "public-v1-openapi-jwt-secret-32-bytes" }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
+  origin = `http://127.0.0.1:${address.port}`;
+});
+
+afterAll(async () => {
+  if (server)
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  await connection.close();
+});
+
+async function request(path: string, operation: string, status = 200, authorization: string | null = `Bearer ${key}`) {
+  const response = await fetch(`${origin}${path}`, {
+    headers: authorization === null ? {} : { Authorization: authorization },
+  });
+  expect(response.status).toBe(status);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("content-type")).toContain("application/json");
+  const body: unknown = await response.json();
+  const accepts = validate.response(operation, response.status);
+  expect(accepts(body), JSON.stringify(accepts.errors)).toBe(true);
+  return body;
+}
+
+type SearchBody = {
+  data: { id: string; impression_rank: number | null }[];
+  applied_filters: Record<string, unknown>;
+  sort: string;
+  limit: number;
+  next_cursor: string | null;
+  cursor_expires_at: string;
+};
+async function search(query = "") {
+  return (await request(`/api/v1/ads?${query}`, "/api/v1/ads")) as SearchBody;
+}
+
+it("validates actual populated search, nullable detail and catalog HTTP responses", async () => {
+  expect((await search()).data).toHaveLength(5);
+  expect(await request("/api/v1/ads/A", "/api/v1/ads/{id}")).toMatchObject({
+    data: { end_date: null, impression_rank: 1, countries: ["US"], discovered_at: "2026-01-01T00:00:00.000Z" },
+  });
+  expect(await request("/api/v1/ads/D", "/api/v1/ads/{id}")).toMatchObject({
+    data: { end_date: "2026-01-04", impression_rank: null },
+  });
+  await request(`/api/v1/ads/${encodeURIComponent("opaque /é")}`, "/api/v1/ads/{id}");
+  const catalog = await request("/api/v1/niches", "/api/v1/niches");
+  expect(catalog).toEqual({ data: niches.map(({ slug, name }) => ({ slug, name })) });
+  expect(contract.components.schemas.NicheSlug.enum).toEqual(niches.map(({ slug }) => slug));
+});
+
+it.each([
+  ["q=serum", ["A", "B", "C", "D"]],
+  ["q=50%25_%5C", ["A", "C", "D"]],
+  ["niche=haircare", ["C"]],
+  ["niche=haircare&niche=fitness", ["opaque /é", "C"]],
+  ["format=image", ["C"]],
+  ["status=inactive", ["D"]],
+  ["started_after=2026-01-01", ["A", "B", "opaque /é"]],
+  [`brand_id=${brandId + 1}`, ["opaque /é"]],
+  [`q=serum&niche=skincare&format=video&status=active&started_after=2026-01-01&brand_id=${brandId}`, ["A", "B"]],
+])("checks filter %s against positive AND negative fixtures", async (query, ids) => {
+  expect((await search(query)).data.map(({ id }) => id)).toEqual(ids);
+});
+
+it("validates empty/default echoes and both sorts through final/null cursors", async () => {
+  const parameters = contract.paths["/api/v1/ads"].get.parameters ?? [];
+  const defaults = Object.fromEntries(parameters.map(({ name, schema }) => [name, schema.default]));
+  const empty = await search("brand_id=2147483647");
+  expect(empty).toMatchObject({
+    data: [],
+    next_cursor: null,
+    sort: contract.components.schemas.Sort.default,
+    limit: defaults.limit,
+    applied_filters: {
+      q: defaults.q,
+      niche: defaults.niche,
+      format: null,
+      status: null,
+      started_after: null,
+      brand_id: 2147483647,
+    },
+  });
+  for (const sort of ["newest", "impressions"]) {
+    const first = await search(`q=%20SERUM%20&niche=skincare&niche=skincare&brand_id=0${brandId}&sort=${sort}&limit=1`);
+    expect(first.applied_filters).toEqual({
+      q: "SERUM",
+      niche: ["skincare"],
+      format: null,
+      status: null,
+      started_after: null,
+      brand_id: brandId,
+    });
+    expect(first.next_cursor).toBeTypeOf("string");
+    const last = await search(`cursor=${first.next_cursor}&limit=100`);
+    expect(last.applied_filters).toEqual(first.applied_filters);
+    expect(last.sort).toBe(sort);
+    expect(last.limit).toBe(100);
+    expect(last.cursor_expires_at).toBe(first.cursor_expires_at);
+    expect(last.next_cursor).toBeNull();
+    expect([...first.data, ...last.data].map(({ id }) => id)).toEqual(["A", "B", "D"]);
+    expect(last.data.at(-1)?.impression_rank).toBeNull();
+  }
+});
+
+async function expectError(path: string, operation: string, status: number, code: string, auth?: string | null) {
+  const body = await request(path, operation, status, auth);
+  expect(body).toMatchObject({ error: { code, retryable: status === 500 } });
+  return body;
+}
+
+it.each(paths)("validates 401 and injected database 500 for GET %s", async (operation) => {
+  const path = operation.replace("{id}", "A");
+  for (const auth of [null, "Basic invalid", "Bearer invalid", "Bearer portal.jwt.token"]) {
+    await expectError(path, operation, 401, "UNAUTHENTICATED", auth);
+  }
+  const spy = vi.spyOn(connection.db, "select").mockImplementationOnce(() => {
+    throw new Error("private SQL sentinel");
+  });
+  try {
+    expect(JSON.stringify(await expectError(path, operation, 500, "INTERNAL_ERROR"))).not.toContain(
+      "private SQL sentinel",
+    );
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+it("validates missing-route/ad 404 and resource/path validation 422 over HTTP", async () => {
+  await expectError("/api/v1/unknown", "/api/v1/ads", 404, "NOT_FOUND");
+  await expectError("/api/v1/ads/missing", "/api/v1/ads/{id}", 404, "AD_NOT_FOUND");
+  await expectError("/api/v1/ads/%ZZ", "/api/v1/ads/{id}", 422, "VALIDATION_ERROR");
+  for (const [path, operation] of [
+    ["/api/v1/niches?limit=1", "/api/v1/niches"],
+    ["/api/v1/ads/A?q=x", "/api/v1/ads/{id}"],
+  ]) {
+    await expectError(path, operation, 422, "VALIDATION_ERROR");
+  }
+});
 
 it("compiles every documented response with draft-2020-12 formats and local references", () => {
   expect(contract.openapi).toMatch(/^3\.1\./);
