@@ -306,6 +306,34 @@ empty/repeated seeding, changed credentials, unrelated records and two real CLI
 runs with ID/hash preservation. Unmigrated-database and invalid-configuration
 checks require prompt nonzero exits without exposing sensitive details.
 
+## Deterministic ad-domain fixtures
+
+`apps/api/src/db/fixtures.ts` provides pure `generateFixtures()` data: 300 brands
+(IDs 1–300) and 20,000 ads (`seed-ad-000001` through `seed-ad-020000`). Each call
+resets xorshift32 to `0x47484b44` and uses a fixed **2026-10-05** reference date,
+never the current clock. Start dates span **2024-10-05 through 2026-10-04**;
+discovery timestamps are fixed UTC instants on the reference date. Exactly 12,000
+ads are active and 8,000 have null impression ranks. Fixtures cover all 12 niches,
+their headline keywords, all three formats, and valid uppercase ISO-2 countries.
+Known ranks are positive and unique within each brand; gaps/nulls are intentional,
+and equal ranks across brands do not imply comparable impressions.
+
+`apps/api/src/ads/model.ts` owns the catalog, country validation, and reusable
+`daysActive(ad, now?)`: whole UTC calendar days from start to today's UTC date
+for active ads, or to the end date for inactive ads. This derivation uses actual
+current time by default, independently of the fixed fixture reference date, and
+is not stored on ads.
+
+```sh
+npm run test:unit -w @gethookd/api -- tests/ads-model.test.ts tests/fixtures.test.ts
+```
+
+These tests cover UTC boundaries, invalid countries, complete fixture equality
+under different clocks, exact distributions, keywords and per-record invariants.
+The generator does not write to PostgreSQL. Database persistence and integration
+with setup/seed, stored API keys, v0 HTTP and live ingest are separate pending
+slices; setup and `db:seed` currently seed only the demo user.
+
 ## Password hashing primitive
 
 `apps/api/src/auth/password.ts` provides async `hashPassword` / `verifyPassword`

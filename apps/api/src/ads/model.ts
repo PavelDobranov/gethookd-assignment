@@ -53,6 +53,20 @@ type AdTiming = { startDate: string } & (
   | { status: "inactive"; endDate: string }
 );
 
+export type Brand = { id: number; name: string };
+
+export type Ad = AdTiming & {
+  id: string;
+  brandId: number;
+  headline: string;
+  bodyText: string;
+  niche: (typeof niches)[number]["slug"];
+  format: (typeof adFormats)[number];
+  impressionRank: number | null;
+  countries: string[];
+  discoveredAt: Date;
+};
+
 // Inputs are validated calendar dates. Subtract UTC midnights, not elapsed local days.
 export function daysActive(ad: AdTiming, now: Date = new Date()): number {
   const endDate =
