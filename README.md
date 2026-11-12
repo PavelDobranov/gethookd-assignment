@@ -151,19 +151,69 @@ npm run start -w @gethookd/api  # run the compiled API after building
 The API listens on `0.0.0.0:3000`. `GET /api/health` returns HTTP 200 with
 `{"status":"ok"}` only after a successful PostgreSQL query. Connectivity failures
 return generic HTTP 503 `SERVICE_UNAVAILABLE`; health responses use
-`Cache-Control: no-store`. Unknown API routes return Express's HTTP 404 response,
-not a frontend SPA page.
+`Cache-Control: no-store`. Unknown API routes outside v1 return Express's HTTP 404
+response, not a frontend SPA page; v1 uses the structured errors described below.
 
 ```sh
 curl -i http://localhost:3000/api/health
 ```
 
-`apps/api/src/app.ts` exports `createApp({ db, jwtSecret })` without opening a
-listener or connecting/migrating/seeding the database. `src/server.ts` loads
+`apps/api/src/app.ts` exports `createApp({ db, jwtSecret, cursorSecret? })` without
+opening a listener or connecting/migrating/seeding the database. Omitting
+`cursorSecret` uses the exported public development default; the runtime server
+explicitly passes the loaded configuration. `src/server.ts` loads
 server-only configuration, owns the database pool and listener, and closes them
 on SIGINT/SIGTERM. Tests use native fetch against a new
 loopback listener on an ephemeral port per test and close it after each test.
 Tests live outside `src/` and are not included in the production build.
+
+## v1 niche discovery
+
+`GET /api/v1/niches` returns `{ "data": [{ "slug": "skincare", "name": "Skincare" }, ...] }`:
+exactly the existing 12 niches in catalog order, with no keywords, counts or
+pagination. It accepts no query parameters. Use the same stored API key as v0,
+now in one `Authorization: Bearer` header:
+
+```sh
+curl -i http://localhost:3000/api/v1/niches \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+```
+
+Each request checks PostgreSQL again; stored-key changes take effect on the next
+request. Query-string keys and portal JWTs cannot replace Bearer API keys. All v1
+successes and errors have `Cache-Control: no-store`. Authentication runs before
+path/query validation, so missing or invalid credentials receive 401 rather than
+protected diagnostics. No request URLs, keys, cursors or raw database errors are
+logged by this boundary.
+
+Errors have exactly these fields (wording may vary):
+
+```json
+{
+  "error": {
+    "code": "UNAUTHENTICATED",
+    "message": "A valid Bearer API key is required.",
+    "next_action": "Provide a stored API key in Authorization: Bearer <key>.",
+    "retryable": false,
+    "details": []
+  }
+}
+```
+
+Current codes are `UNAUTHENTICATED` (401), `NOT_FOUND` (404, unknown route or
+method), `VALIDATION_ERROR` (422, unsupported niche query parameters or malformed
+path encoding), and `INTERNAL_ERROR` (500, including database failure). Only 500
+is retryable, after a short delay. Validation details contain `parameter`,
+`reason`, `allowed_values` and nullable `suggestion`; this endpoint accepts no
+query parameters, so its allowed-values list is empty. Unsupported HEAD returns
+404 headers without a body, as required by HTTP. v0 and portal errors are unchanged.
+Search, ad detail, cursor HTTP errors and OpenAPI coverage remain later M3 slices;
+rate limiting remains M4 work.
+
+Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-resources.test.ts tests/v0.test.ts`
+checks real HTTP/PostgreSQL authentication, exact catalog/response allowlists,
+next-request key changes, duplicate credentials, isolated 401/404/422/injected-500,
+and legacy compatibility.
 
 ## Server configuration
 
@@ -230,9 +280,10 @@ imported by the web app.
 
 ### Cursor secret operations
 
-`CURSOR_SECRET` is server-only configuration for the v1 cursor codec; HTTP/search
-consumers are not wired yet. Never reuse `JWT_SECRET` or API-key material, and never
-prefix this setting with `VITE_` or pass it to the web build. Neither startup path
+`CURSOR_SECRET` is server-only configuration passed through server/app/v1 router
+composition for the cursor codec; the search endpoint is not exposed yet. Never
+reuse `JWT_SECRET` or API-key material, and never prefix this setting with `VITE_`
+or pass it to the web build. Neither startup path
 requires a `.env` file or manual secret setup for local development.
 
 To generate a private override, run `openssl rand -hex 32` and store the output as
@@ -265,7 +316,7 @@ at or after expiry, authenticated valid tokens raise `CURSOR_EXPIRED`. Both requ
 an unmodified valid token or a fresh search, not a silent restart. Oversized
 server-generated state fails explicitly rather than truncating the snapshot; this
 bounds supported concurrent snapshot metadata, not the result count. These error
-codes are internal until the v1 HTTP boundary is connected.
+codes remain internal until cursor-consuming HTTP endpoints are implemented.
 
 Focused verification: `npm run test:unit -w @gethookd/api -- tests/v1-cursor.test.ts`
 covers both sorts, null ranks, replay/reconstruction, tampering, authenticated

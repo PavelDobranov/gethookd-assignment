@@ -1,8 +1,8 @@
 import { once } from "node:events";
-import type { Server } from "node:http";
+import { request as httpRequest, type Server } from "node:http";
 import { eq, sql } from "drizzle-orm";
 import { SignJWT } from "jose";
-import { afterAll, beforeAll, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, expect, inject, it, vi } from "vitest";
 
 import { niches } from "../src/ads/model.js";
 import { hashApiKey } from "../src/api-keys/index.js";
@@ -72,8 +72,11 @@ it("returns exactly the existing ordered slug/name catalog and accepts the same 
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.json()).toEqual({ data: niches.map(({ slug, name }) => ({ slug, name })) });
   expect(niches).toHaveLength(12);
-  const legacy = await fetch(`${origin}/api/v0/ads?api_key=${key}&per_page=1`);
-  expect(legacy.status).toBe(200);
+  for (const storedKey of [key, "gethookd-public-demo-api-key-m2"]) {
+    expect((await request("/niches", `Bearer ${storedKey}`)).status).toBe(200);
+    const legacy = await fetch(`${origin}/api/v0/ads?api_key=${storedKey}&per_page=1`);
+    expect(legacy.status).toBe(200);
+  }
 });
 
 it.each([
@@ -98,6 +101,101 @@ it("rejects query-key-only and portal JWT substitution", async () => {
     .setExpirationTime("1h")
     .sign(new TextEncoder().encode(jwtSecret));
   await expectError(await request("/niches", `Bearer ${jwt}`), 401, "UNAUTHENTICATED");
+});
+
+it.each([
+  "?api_key=credential-sentinel",
+  "?niche=skincare",
+  "?limit=1",
+  "?niche[]=skincare",
+  "?x=1&x=2",
+  "?=x",
+  "??limit=1",
+  "?&?api_key=credential-sentinel",
+])("rejects all supplied niche query names: %s", async (query) => {
+  const error = await expectError(await request(`/niches${query}`), 422, "VALIDATION_ERROR");
+  expect(error.details).toEqual([
+    { parameter: "query", reason: "unknown_parameter", allowed_values: [], suggestion: null },
+  ]);
+});
+
+it.each(["/niches?bad=1", "/ads/%E0%A4%A", "/missing"])(
+  "authenticates before disclosing diagnostics: %s",
+  async (path) => {
+    await expectError(await request(path, null), 401, "UNAUTHENTICATED");
+  },
+);
+
+it.each(["/ads/%E0%A4%A", "/ads/%FF", "/niches/%ZZ"])("isolates malformed paths: %s", async (path) => {
+  const error = await expectError(await request(path), 422, "VALIDATION_ERROR");
+  expect(error.details).toEqual([
+    { parameter: "path", reason: "malformed_encoding", allowed_values: [], suggestion: null },
+  ]);
+});
+
+it.each(["/missing", "/", "/ads", "/niches/extra"])("isolates unknown routes: %s", async (path) => {
+  const error = await expectError(await request(path), 404, "NOT_FOUND");
+  expect(error.details).toEqual([]);
+});
+
+it.each(["POST", "PUT", "DELETE", "PATCH", "OPTIONS"])("returns structured 404 for unsupported %s", async (method) => {
+  const response = await fetch(`${origin}/api/v1/niches`, { method, headers: { Authorization: `Bearer ${key}` } });
+  await expectError(response, 404, "NOT_FOUND");
+});
+
+it("does not implicitly expose GET through HEAD", async () => {
+  const response = await fetch(`${origin}/api/v1/niches`, {
+    method: "HEAD",
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  expect(response.status).toBe(404);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("content-type")).toContain("application/json");
+  expect(await response.text()).toBe(""); // HTTP HEAD has no response body.
+});
+
+it("rejects duplicate Authorization headers even when Node would discard one", async () => {
+  const result = await new Promise<{ status: number | undefined; body: string; cache: string | undefined }>(
+    (resolve, reject) => {
+      const req = httpRequest(
+        `${origin}/api/v1/niches`,
+        {
+          headers: ["Host", new URL(origin).host, "Authorization", `Bearer ${key}`, "Authorization", `Bearer ${key}`],
+        },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => {
+            body += chunk;
+          });
+          res.on("end", () => resolve({ status: res.statusCode, body, cache: res.headers["cache-control"] }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    },
+  );
+  expect(result.status).toBe(401);
+  expect(result.cache).toBe("no-store");
+  expect(JSON.parse(result.body).error.code).toBe("UNAUTHENTICATED");
+});
+
+it("keeps injected database failures as sanitized 500s without logging raw diagnostics", async () => {
+  const logs = ["error", "warn", "log", "info"] as const;
+  const spies = logs.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+  const failure = vi.spyOn(connection.db, "select").mockImplementationOnce(() => {
+    throw new Error(`SELECT credential-sentinel ${key} cursor-sentinel`);
+  });
+  try {
+    const error = await expectError(await request("/niches?cursor=cursor-sentinel"), 500, "INTERNAL_ERROR");
+    expect(error.details).toEqual([]);
+    expect(JSON.stringify(error)).not.toMatch(/SELECT|sentinel|public-v1/);
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  } finally {
+    failure.mockRestore();
+    for (const spy of spies) spy.mockRestore();
+  }
+  expect((await request()).status).toBe(200);
 });
 
 it("consults stored keys again on the very next request", async () => {

@@ -20,16 +20,47 @@ function createAuthenticateHandler(db: ReturnType<typeof createDatabase>["db"]):
   };
 }
 
-const handleGetNiches: RequestHandler = (_req, res) => {
+const validatePath: RequestHandler = (req, res, next) => {
+  try {
+    decodeURI(req.path);
+  } catch {
+    sendV1Error(res, "VALIDATION_ERROR", [
+      { parameter: "path", reason: "malformed_encoding", allowed_values: [], suggestion: null },
+    ]);
+    return;
+  }
+  next();
+};
+
+const handleGetNiches: RequestHandler = (req, res, next) => {
+  // Express normally falls back from HEAD to GET; only GET is part of this contract.
+  if (req.method !== "GET") {
+    next();
+    return;
+  }
+  const queryStart = req.originalUrl.indexOf("?");
+  const parameters = new URLSearchParams(queryStart === -1 ? "" : req.originalUrl.slice(queryStart + 1));
+  if (parameters.size > 0) {
+    sendV1Error(res, "VALIDATION_ERROR", [
+      { parameter: "query", reason: "unknown_parameter", allowed_values: [], suggestion: null },
+    ]);
+    return;
+  }
   res.json({ data: niches.map(({ slug, name }) => ({ slug, name })) });
 };
 
-export function createV1Router({ db }: { db: ReturnType<typeof createDatabase>["db"] }) {
+const handleNotFound: RequestHandler = (_req, res) => {
+  sendV1Error(res, "NOT_FOUND");
+};
+
+export function createV1Router({ db }: { db: ReturnType<typeof createDatabase>["db"]; cursorSecret: string }) {
   const router = Router();
 
   router.use(disableCaching);
   router.use(createAuthenticateHandler(db));
+  router.use(validatePath);
   router.get("/niches", handleGetNiches);
+  router.use(handleNotFound);
   router.use(handleV1Errors);
 
   return router;
