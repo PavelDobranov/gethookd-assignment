@@ -42,6 +42,7 @@ Explicit root commands forward to installed workspace-local tooling:
 npm run db:generate  # Generate migrations for review/commit, never during startup
 npm run db:migrate   # Drizzle Kit applies committed pending migrations only
 npm run db:seed      # Add missing demo user, brands, ads and public key; preserve data
+npm run ingest       # Explicit single-process live ingest; initialize the database first
 npm run db:studio    # Explicit local Studio, 127.0.0.1:4983; stop with Ctrl+C
 ```
 
@@ -391,7 +392,31 @@ exhaustion fails and rolls back rather than renumbering or dropping fixtures.
 v0 HTTP authentication uses the stored hash on every request. The atomic ingest
 operation below evolves this world without resetting fixtures.
 
-## Atomic ingest tick
+## Live ingest
+
+After successful setup/initialization, run in a separate terminal:
+
+```sh
+npm run ingest
+# Ctrl-C to stop; SIGTERM is also supported.
+```
+
+The root command forwards to the API workspace CLI and uses the same server-only
+configuration as other database commands (root `.env`, overridden by exported
+variables such as `DATABASE_URL`). It never migrates or seeds. API startup,
+setup, dev and Compose do not launch it automatically. Run only one ingest process
+against a database; concurrent workers/processes are unsupported. Stop ingest
+before running setup/seed again.
+
+The first tick starts after one second. Each completed tick is followed by another
+one-second wait, so slow ticks never overlap or trigger catch-up bursts. SIGINT
+and SIGTERM cancel future scheduling, let the in-flight transaction finish or
+roll back, then close the database pool. Configuration, database and tick failures
+exit nonzero with `Ingest failed.`; cleanup failure uses
+`Ingest database shutdown failed.`. Diagnostics never include raw errors or URLs.
+There is no automatic retry or distributed-worker coordination.
+
+### Atomic tick
 
 `apps/api/src/ingest/tick.ts` exports Express-independent
 `runIngestTick(db, { clock?, random? })`. Defaults use the current clock and
@@ -412,16 +437,18 @@ fails the whole transaction rather than wrapping, renumbering or substituting nu
 Any failure rolls back all inserts and deactivations.
 
 ```sh
-npm run test:unit -w @gethookd/api -- tests/ingest.test.ts
+npm run test:unit -w @gethookd/api -- tests/ingest.test.ts tests/ingest-runner.test.ts
 npm run test:integration -w @gethookd/api -- tests/ingest-db.test.ts
 ```
 
 Controlled tests cover probability thresholds, UTC boundaries, available candidate
 counts, valid new ads, brand-local allocation, integer exhaustion and real
 PostgreSQL rollback after an injected failure or invalid generated countries.
-This operation has no timer, listener or startup side effects. The explicit
-serial ingest process/command and its shutdown smoke check belong to #48; only
-one ingest process will be supported, with no multi-worker coordination.
+The tick itself has no timer, listener or startup side effects. Runner tests use
+an injected clock/tick to prove serial cadence, shutdown draining and sanitized
+failure/cleanup paths. Actual-process tests use isolated PostgreSQL to observe
+inserts/deactivation, both shutdown signals, released connections and sanitized
+failure through the root command; they never wait for random backdating.
 
 ## Legacy v0 parameter contract
 

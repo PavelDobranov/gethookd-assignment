@@ -9,6 +9,7 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project postgres",
     "start": "node dist/server.js",
+    "ingest": "node --import tsx src/ingest/cli.ts",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
     "db:seed": "tsx src/db/seed.ts",

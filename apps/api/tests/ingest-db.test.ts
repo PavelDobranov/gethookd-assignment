@@ -1,3 +1,7 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import {
@@ -243,6 +247,113 @@ it.each([null, "US", ["US", "ZZ"], [null]].map((countries) => ({ countries })))(
     );
     expect(await state()).toEqual(before);
   },
+);
+
+it.each(["SIGINT", "SIGTERM"] as const)(
+  "the CLI inserts/deactivates, exits cleanly on %s and releases connections",
+  async (signal) => {
+    await existing("process-candidate", { startDate: "2020-01-01" });
+    const processUrl = new URL(url);
+    processUrl.searchParams.set("application_name", "ingest-process-smoke");
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", "src/ingest/cli.ts"],
+      {
+        env: { ...process.env, DATABASE_URL: processUrl.href },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const exited = once(child, "close");
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    try {
+      await expect
+        .poll(
+          async () => {
+            const stored = await state();
+            return (
+              stored.some((ad) => ad.id.startsWith("ingest-ad-")) &&
+              stored.find((ad) => ad.id === "process-candidate")?.status ===
+                "inactive"
+            );
+          },
+          { timeout: 8000, interval: 100 },
+        )
+        .toBe(true);
+      child.kill(signal);
+      expect(
+        await Promise.race([exited, delay(5000).then(() => "timeout")]),
+      ).toEqual([0, null]);
+      const connections = await db.execute(
+        sql`SELECT count(*)::int AS count FROM pg_stat_activity WHERE application_name = 'ingest-process-smoke'`,
+      );
+      expect(connections.rows).toEqual([{ count: 0 }]);
+      expect(output).toBe("");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await exited;
+      }
+    }
+  },
+  15000,
+);
+
+function terminateProcessGroup(pid: number | undefined) {
+  if (!pid) return;
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if (
+      !(error instanceof Error && "code" in error && error.code === "ESRCH")
+    ) {
+      throw error;
+    }
+  }
+}
+
+it.each([
+  [
+    "unavailable database",
+    "postgresql://credential-sentinel:private@127.0.0.1:1/unavailable",
+  ],
+  ["invalid configuration", "credential-sentinel:invalid"],
+])(
+  "root ingest forwards to the CLI and sanitizes %s failure",
+  async (_label, databaseUrl) => {
+    const child = spawn("npm", ["run", "ingest", "--silent"], {
+      cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    const exited = once(child, "close");
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    try {
+      expect(
+        await Promise.race([exited, delay(8000).then(() => "timeout")]),
+      ).toEqual([1, null]);
+      expect(output).toBe("Ingest failed.\n");
+    } finally {
+      terminateProcessGroup(child.pid);
+      await exited;
+    }
+  },
+  10000,
 );
 
 it("fails atomically when no existing brands are available", async () => {

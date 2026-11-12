@@ -11,6 +11,7 @@
     "db:generate": "npm run db:generate -w @gethookd/api",
     "db:migrate": "npm run db:migrate -w @gethookd/api",
     "db:seed": "npm run db:seed -w @gethookd/api",
+    "ingest": "npm run ingest -w @gethookd/api",
     "db:studio": "npm run db:studio -w @gethookd/api",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test -w @gethookd/api && npm run test -w @gethookd/web",
