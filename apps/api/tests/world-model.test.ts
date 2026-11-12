@@ -1,0 +1,373 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { sql } from "drizzle-orm";
+import { readMigrationFiles } from "drizzle-orm/migrator";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
+import { createDatabase } from "../src/db/client.js";
+import { generateFixtures } from "../src/db/fixtures.js";
+import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+
+const worldUrl = new URL(inject("postgresUrl"));
+worldUrl.pathname = "/gethookd_world_test";
+const { db, close } = createDatabase(worldUrl.href);
+const ownerId = "00000000-0000-0000-0000-000000000001";
+let adNumber = 0;
+
+beforeAll(async () => {
+  const admin = createDatabase(inject("postgresUrl"));
+  try {
+    await admin.db.execute(sql`CREATE DATABASE gethookd_world_test`);
+    await admin.db.execute(sql`CREATE DATABASE gethookd_world_upgrade`);
+  } finally {
+    await admin.close();
+  }
+  await migrate(db, { migrationsFolder: "drizzle" });
+});
+
+afterAll(close);
+beforeEach(async () => {
+  // Only this suite's database in the disposable test project is touched.
+  await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
+  await db.execute(
+    sql`INSERT INTO brands (id, name) VALUES (1, 'First'), (2, 'Second')`,
+  );
+  await db
+    .insert(users)
+    .values({ id: ownerId, username: "owner", passwordHash: "test-hash" });
+});
+
+function insertAd(overrides: Record<string, unknown> = {}) {
+  const record = {
+    id: `test-ad-${++adNumber}`,
+    brand_id: 1,
+    headline: "A serum headline",
+    body_text: "A searchable body",
+    niche: "skincare",
+    format: "image",
+    status: "active",
+    start_date: "2026-10-04",
+    end_date: null,
+    impression_rank: null,
+    countries: ["US", "GB"],
+    discovered_at: "2026-10-05T12:34:56Z",
+    ...overrides,
+  };
+  return db.execute(sql`
+    INSERT INTO ads SELECT * FROM jsonb_populate_record(NULL::ads, ${JSON.stringify(record)}::jsonb)
+    RETURNING *
+  `);
+}
+
+it("has only the intended storage columns and PostgreSQL identity/date/array types", async () => {
+  const result = await db.execute(sql`
+    SELECT table_name, column_name, udt_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name IN ('brands', 'ads', 'api_keys')
+    ORDER BY table_name, ordinal_position
+  `);
+  expect(result.rows).toEqual([
+    ...[
+      ["id", "text"],
+      ["brand_id", "int4"],
+      ["headline", "text"],
+      ["body_text", "text"],
+      ["niche", "text"],
+      ["format", "text"],
+      ["status", "text"],
+      ["start_date", "date"],
+      ["end_date", "date"],
+      ["impression_rank", "int4"],
+      ["countries", "_text"],
+      ["discovered_at", "timestamptz"],
+    ].map(([column_name, udt_name]) => ({
+      table_name: "ads",
+      column_name,
+      udt_name,
+    })),
+    ...[
+      ["id", "uuid"],
+      ["user_id", "uuid"],
+      ["key_hash", "text"],
+    ].map(([column_name, udt_name]) => ({
+      table_name: "api_keys",
+      column_name,
+      udt_name,
+    })),
+    ...[
+      ["id", "int4"],
+      ["name", "text"],
+    ].map(([column_name, udt_name]) => ({
+      table_name: "brands",
+      column_name,
+      udt_name,
+    })),
+  ]);
+});
+
+it("round-trips domain fixtures through Drizzle and preserves all world records on migration replay", async () => {
+  const ad = generateFixtures().ads[0];
+  const [stored] = await db.insert(ads).values(ad).returning();
+  expect(stored).toEqual(ad);
+  const keysBefore = await db
+    .insert(apiKeys)
+    .values({ userId: ownerId, keyHash: "round-trip-hash" })
+    .returning();
+  const brandsBefore = await db.select().from(brands).orderBy(brands.id);
+  const usersBefore = await db.select().from(users);
+  await migrate(db, { migrationsFolder: "drizzle" });
+  expect(await db.select().from(ads)).toEqual([ad]);
+  expect(await db.select().from(apiKeys)).toEqual(keysBefore);
+  expect(await db.select().from(brands).orderBy(brands.id)).toEqual(
+    brandsBefore,
+  );
+  expect(
+    JSON.stringify(await db.select().from(users)) ===
+      JSON.stringify(usersBefore),
+  ).toBe(true);
+});
+
+it.each(["id", "name"])("rejects NULL brands.%s", async (column) => {
+  const id = column === "id" ? null : 3;
+  const name = column === "name" ? null : "Third";
+  await expect(
+    db.execute(sql`INSERT INTO brands (id, name) VALUES (${id}, ${name})`),
+  ).rejects.toMatchObject({ cause: { code: "23502", column } });
+});
+
+it("rejects duplicate brand IDs and non-integer brand identities", async () => {
+  await expect(
+    db.execute(sql`INSERT INTO brands (id, name) VALUES (1, 'Duplicate')`),
+  ).rejects.toMatchObject({
+    cause: { code: "23505", constraint: "brands_pkey" },
+  });
+  await expect(
+    db.execute(sql`INSERT INTO brands (id, name) VALUES ('1.5', 'Fractional')`),
+  ).rejects.toMatchObject({ cause: { code: "22P02" } });
+});
+
+it.each([
+  "id",
+  "brand_id",
+  "headline",
+  "body_text",
+  "niche",
+  "format",
+  "status",
+  "start_date",
+  "countries",
+  "discovered_at",
+])("rejects NULL ads.%s", async (column) => {
+  await expect(insertAd({ [column]: null })).rejects.toMatchObject({
+    cause: { code: "23502", column },
+  });
+});
+
+it("rejects duplicate ad identities and orphaned brands", async () => {
+  await insertAd({ id: "duplicate-ad" });
+  await expect(insertAd({ id: "duplicate-ad" })).rejects.toMatchObject({
+    cause: { code: "23505", constraint: "ads_pkey" },
+  });
+  await expect(insertAd({ brand_id: 999 })).rejects.toMatchObject({
+    cause: { code: "23503" },
+  });
+  await expect(
+    db.execute(sql`DELETE FROM brands WHERE id = 1`),
+  ).rejects.toMatchObject({ cause: { code: "23503" } });
+});
+
+it.each([
+  ["niche", "unknown", "ads_niche_check"],
+  ["niche", "Skincare", "ads_niche_check"],
+  ["format", "audio", "ads_format_check"],
+  ["format", "Image", "ads_format_check"],
+  ["status", "paused", "ads_status_check"],
+  ["status", "Active", "ads_status_check"],
+  ["impression_rank", 0, "ads_impression_rank_check"],
+  ["impression_rank", -1, "ads_impression_rank_check"],
+])("rejects ads.%s = %s", async (column, value, constraint) => {
+  await expect(insertAd({ [column]: value })).rejects.toMatchObject({
+    cause: { code: "23514", constraint },
+  });
+});
+
+it.each([
+  { status: "active", end_date: "2026-10-05" },
+  { status: "inactive", end_date: null },
+])(
+  "rejects inconsistent status/end date $status/$end_date",
+  async (overrides) => {
+    await expect(insertAd(overrides)).rejects.toMatchObject({
+      cause: { code: "23514", constraint: "ads_status_end_date_check" },
+    });
+  },
+);
+
+it("rejects end dates before start dates and malformed calendar dates/ranks", async () => {
+  await expect(
+    insertAd({ status: "inactive", end_date: "2026-10-03" }),
+  ).rejects.toMatchObject({
+    cause: { code: "23514", constraint: "ads_date_order_check" },
+  });
+  await expect(insertAd({ start_date: "2026-02-30" })).rejects.toMatchObject({
+    cause: { code: "22008" },
+  });
+  await expect(insertAd({ impression_rank: 1.5 })).rejects.toMatchObject({
+    cause: { code: "22P02" },
+  });
+});
+
+it("allows all catalog values and inactive dates equal to or after start", async () => {
+  const niches = [
+    "skincare",
+    "haircare",
+    "supplements",
+    "fitness",
+    "pet-supplies",
+    "home-decor",
+    "kitchen",
+    "apparel",
+    "jewelry",
+    "baby-kids",
+    "outdoor",
+    "tech-accessories",
+  ];
+  for (const niche of niches) await insertAd({ niche });
+  for (const format of ["image", "video", "carousel"])
+    await insertAd({ format });
+  await insertAd({ status: "inactive", end_date: "2026-10-04" });
+  await insertAd({ status: "inactive", end_date: "2026-10-05" });
+});
+
+it("allows gaps, multiple nulls and equal cross-brand ranks, but not duplicate brand-local known ranks", async () => {
+  await insertAd({ impression_rank: 1 });
+  await insertAd({ impression_rank: 3 });
+  await insertAd({ impression_rank: null });
+  await insertAd({ impression_rank: null });
+  await insertAd({ brand_id: 2, impression_rank: 1 });
+  await expect(insertAd({ impression_rank: 1 })).rejects.toMatchObject({
+    cause: { code: "23505", constraint: "ads_brand_rank_unique" },
+  });
+});
+
+it("generates UUID key identities, enforces unique hashes and user references, and permits multiple keys per user", async () => {
+  const result = await db.execute(
+    sql`INSERT INTO api_keys (user_id, key_hash) VALUES (${ownerId}, 'first-hash'), (${ownerId}, 'second-hash') RETURNING id`,
+  );
+  expect(result.rows).toHaveLength(2);
+  for (const { id } of result.rows) expect(id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(result.rows[0].id).not.toBe(result.rows[1].id);
+  await expect(
+    db.execute(
+      sql`INSERT INTO api_keys (id, user_id, key_hash) VALUES (${result.rows[0].id}, ${ownerId}, 'third-hash')`,
+    ),
+  ).rejects.toMatchObject({
+    cause: { code: "23505", constraint: "api_keys_pkey" },
+  });
+  await expect(
+    db.execute(
+      sql`INSERT INTO api_keys (user_id, key_hash) VALUES (${ownerId}, 'first-hash')`,
+    ),
+  ).rejects.toMatchObject({
+    cause: { code: "23505", constraint: "api_keys_key_hash_unique" },
+  });
+  await expect(
+    db.execute(
+      sql`INSERT INTO api_keys (user_id, key_hash) VALUES ('00000000-0000-0000-0000-000000000099', 'orphan-hash')`,
+    ),
+  ).rejects.toMatchObject({ cause: { code: "23503" } });
+  await expect(
+    db.execute(sql`DELETE FROM users WHERE id = ${ownerId}`),
+  ).rejects.toMatchObject({ cause: { code: "23503" } });
+});
+
+it.each(["id", "user_id", "key_hash"])(
+  "rejects NULL api_keys.%s",
+  async (column) => {
+    const record = {
+      id: "00000000-0000-0000-0000-000000000002",
+      user_id: ownerId,
+      key_hash: "hash",
+      [column]: null,
+    };
+    await expect(
+      db.execute(
+        sql`INSERT INTO api_keys SELECT * FROM jsonb_populate_record(NULL::api_keys, ${JSON.stringify(record)}::jsonb)`,
+      ),
+    ).rejects.toMatchObject({ cause: { code: "23502", column } });
+  },
+);
+
+it("upgrades an M1 database without changing users and replays the complete migration ledger unchanged", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "gethookd-m1-migrations-"));
+  const upgradeUrl = new URL(worldUrl);
+  upgradeUrl.pathname = "/gethookd_world_upgrade";
+  const connection = createDatabase(upgradeUrl.href);
+  try {
+    const journal = JSON.parse(
+      await readFile("drizzle/meta/_journal.json", "utf8"),
+    );
+    const first = journal.entries[0];
+    expect(first.tag).toBe("0000_living_skreet");
+    await mkdir(join(directory, "meta"));
+    await writeFile(
+      join(directory, "meta/_journal.json"),
+      JSON.stringify({ ...journal, entries: [first] }),
+    );
+    await writeFile(
+      join(directory, `${first.tag}.sql`),
+      await readFile(`drizzle/${first.tag}.sql`),
+    );
+    await migrate(connection.db, { migrationsFolder: directory });
+    await connection.db.insert(users).values({
+      username: "existing-m1-user",
+      passwordHash: "preserved-exact-hash",
+    });
+    const before = await connection.db.select().from(users);
+    const oldLedger = await connection.db.execute(
+      sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
+    );
+    expect(oldLedger.rows).toHaveLength(1);
+    await migrate(connection.db, { migrationsFolder: "drizzle" });
+    expect(
+      JSON.stringify(await connection.db.select().from(users)) ===
+        JSON.stringify(before),
+    ).toBe(true);
+    const ledger = await connection.db.execute(
+      sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
+    );
+    expect(ledger.rows[0]).toEqual(oldLedger.rows[0]);
+    expect(
+      ledger.rows.map(({ hash, created_at }) => ({ hash, created_at })),
+    ).toEqual(
+      readMigrationFiles({ migrationsFolder: "drizzle" }).map(
+        ({ hash, folderMillis }) => ({
+          hash,
+          created_at: String(folderMillis),
+        }),
+      ),
+    );
+    expect(
+      (
+        await connection.db.execute(
+          sql`SELECT to_regclass('brands') AS brands, to_regclass('ads') AS ads, to_regclass('api_keys') AS api_keys`,
+        )
+      ).rows,
+    ).toEqual([{ brands: "brands", ads: "ads", api_keys: "api_keys" }]);
+    await migrate(connection.db, { migrationsFolder: "drizzle" });
+    expect(
+      (
+        await connection.db.execute(
+          sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
+        )
+      ).rows,
+    ).toEqual(ledger.rows);
+    expect(
+      JSON.stringify(await connection.db.select().from(users)) ===
+        JSON.stringify(before),
+    ).toBe(true);
+  } finally {
+    await connection.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

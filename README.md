@@ -330,9 +330,41 @@ npm run test:unit -w @gethookd/api -- tests/ads-model.test.ts tests/fixtures.tes
 
 These tests cover UTC boundaries, invalid countries, complete fixture equality
 under different clocks, exact distributions, keywords and per-record invariants.
-The generator does not write to PostgreSQL. Database persistence and integration
-with setup/seed, stored API keys, v0 HTTP and live ingest are separate pending
-slices; setup and `db:seed` currently seed only the demo user.
+The generator does not write to PostgreSQL. The storage schema below is available;
+integration of fixtures with setup/seed, stored-key authentication, v0 HTTP and
+live ingest remain separate pending slices. Setup and `db:seed` currently seed
+only the demo user.
+
+## Ad and API-key storage
+
+The append-only `0001_lucky_next_avengers.sql` migration adds `brands`, `ads`,
+and `api_keys` without changing `users` or its existing data. Both initialization
+paths apply committed migrations; generation remains an explicit development step.
+
+`brands` has an integer ID and required name. `ads` has a stable text ID and a
+required brand reference, headline/body, niche, format, status, start date,
+country-code array and UTC discovery timestamp. PostgreSQL checks catalog
+membership, positive-or-null impression ranks, active/null versus inactive/required
+end dates, and end dates on/after start dates. Known ranks are unique per brand;
+multiple nulls and equal ranks in different brands remain valid. Country membership
+is validated in the application, not through a database country table.
+`days_active` remains derived and is not a column.
+
+`api_keys` stores only a generated UUID ID, required user reference, and unique
+required `key_hash`; no plaintext or lifecycle metadata is stored. Foreign keys
+prevent deletion of a referenced brand/user rather than silently removing ads/keys.
+This is storage only: key hashing, key seeding and request authentication are not
+implemented by this migration.
+
+```sh
+npm run test:integration -w @gethookd/api -- tests/db.test.ts tests/world-model.test.ts
+```
+
+The disposable PostgreSQL tests exercise accepted/rejected constraints, typed
+fixture round-trips, empty-database migration, M1 upgrades with exact user
+preservation, and migration replay preserving world data. Ledger checks compare
+all committed SQL hashes and journal timestamps and retain exact replay equality.
+No developer database is used.
 
 ## Password hashing primitive
 

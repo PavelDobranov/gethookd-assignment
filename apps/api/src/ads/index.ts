@@ -1,1 +1,1 @@
-export { type Ad, adFormats, type Brand, niches } from "./model.js";
+export { type Ad, adFormats, adStatuses, type Brand, niches } from "./model.js";
