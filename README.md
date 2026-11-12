@@ -433,7 +433,13 @@ object, to preserve this distinction.
 
 ```sh
 npm run test:unit -w @gethookd/api -- tests/ads-parameters.test.ts
+npm run test:integration -w @gethookd/api -- tests/v0.test.ts tests/login.test.ts tests/identity.test.ts tests/health.test.ts
 ```
+
+The HTTP suite uses an isolated PostgreSQL database and discriminating fixtures
+for filters, pagination boundaries, duplicate raw names and stored-key changes.
+It also exercises real auth/count/row-query failures and checks application
+output for credential-bearing errors without changing portal error contracts.
 
 ## Ad and API-key storage
 
