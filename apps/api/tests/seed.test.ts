@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
+
 import { hashApiKey, validateApiKey } from "../src/api-keys/index.js";
 import { hashPassword, verifyPassword } from "../src/auth/password.js";
 import { createDatabase } from "../src/db/client.js";

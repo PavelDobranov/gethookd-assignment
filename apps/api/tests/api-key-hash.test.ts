@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+
 import { hashApiKey } from "../src/api-keys/keys.js";
 
 it("hashes the public development fixture as SHA-256 lowercase hexadecimal", () => {

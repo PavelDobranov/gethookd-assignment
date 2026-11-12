@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { createIngestAd } from "../src/ingest/ad.js";
 import { validateIngestCountries } from "../src/ingest/tick.js";
 

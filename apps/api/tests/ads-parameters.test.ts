@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { adFormats, adStatuses, niches } from "../src/ads/model.js";
 import { parseAdParameters } from "../src/ads/parameters.js";
 

@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
+
 import { createDatabase } from "../src/db/client.js";
 import { generateFixtures } from "../src/db/fixtures.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";

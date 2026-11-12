@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { isCountryCode, niches } from "../src/ads/model.js";
 import { generateFixtures } from "../src/db/fixtures.js";
 

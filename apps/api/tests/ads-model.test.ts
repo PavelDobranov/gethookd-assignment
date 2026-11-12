@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { adFormats, adStatuses, daysActive, isCountryCode, niches } from "../src/ads/model.js";
 
 const expectedNiches = [

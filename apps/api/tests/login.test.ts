@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import { eq, sql } from "drizzle-orm";
 import { jwtVerify } from "jose";
 import { afterAll, beforeAll, expect, inject, it, vi } from "vitest";
+
 import { createApp } from "../src/app.js";
 import { hashPassword } from "../src/auth/password.js";
 import { createDatabase } from "../src/db/client.js";

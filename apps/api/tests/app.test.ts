@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 

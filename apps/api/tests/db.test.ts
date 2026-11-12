@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { eq, sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { afterAll, beforeAll, expect, inject, it } from "vitest";
+
 import { createDatabase } from "../src/db/client.js";
 import { users } from "../src/db/schema.js";
 

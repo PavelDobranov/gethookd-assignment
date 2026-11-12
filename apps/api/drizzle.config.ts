@@ -1,4 +1,5 @@
 import { defineConfig } from "drizzle-kit";
+
 import { loadConfig } from "./src/config.js";
 
 export default defineConfig({

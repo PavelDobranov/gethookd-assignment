@@ -2,6 +2,7 @@ import { once } from "node:events";
 import type { Server } from "node:http";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, inject, it, vi } from "vitest";
+
 import { niches } from "../src/ads/model.js";
 import { hashApiKey } from "../src/api-keys/index.js";
 import { createApp } from "../src/app.js";

@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
+
 import { hashApiKey, validateApiKey } from "../src/api-keys/index.js";
 import { createDatabase } from "../src/db/client.js";
 import { apiKeys, users } from "../src/db/schema.js";

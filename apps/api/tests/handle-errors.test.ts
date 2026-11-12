@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import { DrizzleQueryError } from "drizzle-orm";
 import express from "express";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
+
 import { handleErrors } from "../src/shared/middleware/handle-errors.js";
 
 let server: Server;

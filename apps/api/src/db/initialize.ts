@@ -1,5 +1,6 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+
 import { loadConfig } from "../config.js";
 import { createDatabase } from "./client.js";
 import { seedDatabase } from "./seed.js";

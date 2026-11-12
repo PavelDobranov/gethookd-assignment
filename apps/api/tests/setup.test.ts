@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeEach, expect, it, vi } from "vitest";
+
 import { runCommand, runSetup } from "../../../scripts/setup.mjs";
 import { initializeDatabase } from "../src/db/initialize.js";
 

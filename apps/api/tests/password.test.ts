@@ -1,5 +1,6 @@
 import { scryptSync } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
+
 import { hashPassword, verifyPassword } from "../src/auth/password.js";
 
 const password = "demo-password";

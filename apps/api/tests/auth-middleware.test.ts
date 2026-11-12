@@ -2,6 +2,7 @@ import { once } from "node:events";
 import type { Server } from "node:http";
 import express, { type Response } from "express";
 import { afterEach, expect, it, vi } from "vitest";
+
 import { type AuthenticatedLocals, createRequireAuthentication } from "../src/auth/middleware.js";
 
 let server: Server | undefined;

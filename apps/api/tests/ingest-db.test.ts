@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
+
 import { createDatabase } from "../src/db/client.js";
 import { ads, brands } from "../src/db/schema.js";
 import * as generation from "../src/ingest/ad.js";

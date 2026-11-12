@@ -1,5 +1,6 @@
 import { scrypt } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
+
 import { verifyPassword } from "../src/auth/password.js";
 
 vi.mock("node:crypto", async (importOriginal) => {
