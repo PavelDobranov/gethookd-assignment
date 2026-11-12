@@ -64,6 +64,13 @@ function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): Reques
       ]);
       return;
     }
+    // PostgreSQL text cannot represent NUL; reject it as input, not a server failure.
+    if (req.params.id.includes("\0")) {
+      sendV1Error(res, "VALIDATION_ERROR", [
+        { parameter: "id", reason: "invalid_text", allowed_values: [], suggestion: null },
+      ]);
+      return;
+    }
     const ad = await getV1Ad(db, req.params.id);
     if (!ad) {
       sendV1Error(res, "AD_NOT_FOUND");

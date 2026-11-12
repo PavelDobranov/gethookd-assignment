@@ -127,6 +127,96 @@ it.each(["?q=serum", "?status=active", "?cursor=sentinel", "?api_key=sentinel", 
   },
 );
 
+it.each(["opaque /?# + café", "%FF", "000123", " quote' OR 1=1 -- "])(
+  "looks up the exact once-decoded opaque ID: %s",
+  async (id) => {
+    const [source] = await connection.db.select().from(ads).where(eq(ads.id, detailId));
+    await connection.db.insert(ads).values({ ...source, id, headline: "Encoded ID fixture", impressionRank: null });
+    const response = await request(`/ads/${encodeURIComponent(id)}`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.id).toBe(id);
+    await expectError(await request(`/ads/${encodeURIComponent(`${id}-missing`)}`), 404, "AD_NOT_FOUND");
+  },
+);
+
+it("rejects a decoded NUL as input rather than a database failure", async () => {
+  const error = await expectError(await request("/ads/bad%00id"), 422, "VALIDATION_ERROR");
+  expect(error.details).toEqual([{ parameter: "id", reason: "invalid_text", allowed_values: [], suggestion: null }]);
+});
+
+it("agrees with v0 across UTC midnight and after deactivation using current joined data", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    for (const [clock, expectedDays] of [
+      ["2026-01-03T23:59:59.999Z", 2],
+      ["2026-01-04T00:00:00.000Z", 3],
+    ] as const) {
+      vi.setSystemTime(new Date(clock));
+      const detail = await (await request(`/ads/${detailId}`)).json();
+      const legacy = await (await fetch(`${origin}/api/v0/ads?api_key=${key}&q=Detail%20headline`)).json();
+      expect(legacy.data).toHaveLength(1);
+      expect(detail.data.days_active).toBe(expectedDays);
+      expect(legacy.data[0].days_active).toBe(detail.data.days_active);
+    }
+    await connection.db
+      .update(ads)
+      .set({ status: "inactive", endDate: "2026-01-02", impressionRank: 1 })
+      .where(eq(ads.id, detailId));
+    await connection.db.update(brands).set({ name: "Current Detail Brand" }).where(eq(brands.id, detailBrand));
+    for (const clock of ["2026-01-04T23:59:59.999Z", "2026-01-05T00:00:00.000Z"]) {
+      vi.setSystemTime(new Date(clock));
+      const response = await request(`/ads/${detailId}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({
+        data: {
+          id: detailId,
+          brand_id: detailBrand,
+          brand_name: "Current Detail Brand",
+          headline: "Detail headline",
+          body_text: "Full untruncated body",
+          niche: "pet-supplies",
+          format: "carousel",
+          status: "inactive",
+          start_date: "2026-01-01",
+          end_date: "2026-01-02",
+          days_active: 1,
+          impression_rank: 1,
+          countries: ["US", "GB"],
+          discovered_at: "2026-01-02T03:04:05.123Z",
+        },
+      });
+      const legacy = await (await fetch(`${origin}/api/v0/ads?api_key=${key}&q=Detail%20headline`)).json();
+      expect(legacy.data).toHaveLength(1);
+      expect(legacy.data[0].days_active).toBe(1);
+      expect(legacy.data[0].status).toBe("inactive");
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("returns a sanitized 500 when the detail query fails after successful authentication", async () => {
+  const logs = ["error", "warn", "log", "info"] as const;
+  const spies = logs.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+  const select = connection.db.select.bind(connection.db);
+  const failure = vi
+    .spyOn(connection.db, "select")
+    .mockImplementationOnce(select)
+    .mockImplementationOnce(() => {
+      throw new Error(`SELECT inserted_xid credential-sentinel ${key}`);
+    });
+  try {
+    const error = await expectError(await request(`/ads/${detailId}`), 500, "INTERNAL_ERROR");
+    expect(error.details).toEqual([]);
+    expect(JSON.stringify(error)).not.toMatch(/SELECT|inserted_xid|sentinel|public-v1/);
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  } finally {
+    failure.mockRestore();
+    for (const spy of spies) spy.mockRestore();
+  }
+});
+
 it("returns exactly the existing ordered slug/name catalog and accepts the same key as v0", async () => {
   const response = await request();
   expect(response.status).toBe(200);
@@ -180,7 +270,7 @@ it.each([
   ]);
 });
 
-it.each(["/niches?bad=1", "/ads/%E0%A4%A", "/missing"])(
+it.each(["/niches?bad=1", `/ads/${detailId}`, "/ads/missing?bad=1", "/ads/%E0%A4%A", "/missing"])(
   "authenticates before disclosing diagnostics: %s",
   async (path) => {
     await expectError(await request(path, null), 401, "UNAUTHENTICATED");
@@ -267,7 +357,9 @@ it("consults stored keys again on the very next request", async () => {
     .where(eq(apiKeys.keyHash, hashApiKey(key)));
   try {
     await expectError(await request(), 401, "UNAUTHENTICATED");
+    await expectError(await request(`/ads/${detailId}`), 401, "UNAUTHENTICATED");
     expect((await request("/niches", `Bearer ${key}-changed`)).status).toBe(200);
+    expect((await request(`/ads/${detailId}`, `Bearer ${key}-changed`)).status).toBe(200);
   } finally {
     await connection.db
       .update(apiKeys)

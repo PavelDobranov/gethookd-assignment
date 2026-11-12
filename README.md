@@ -202,7 +202,7 @@ Errors have exactly these fields (wording may vary):
 
 Current codes are `UNAUTHENTICATED` (401), `NOT_FOUND` (404, unknown route or
 method), `AD_NOT_FOUND` (404, missing ad), `VALIDATION_ERROR` (422, unsupported resource query parameters or malformed
-path encoding), and `INTERNAL_ERROR` (500, including database failure). Only 500
+path encoding or a decoded NUL in an ad ID), and `INTERNAL_ERROR` (500, including database failure). Only 500
 is retryable, after a short delay. Validation details contain `parameter`,
 `reason`, `allowed_values` and nullable `suggestion`; this endpoint accepts no
 query parameters, so its allowed-values list is empty. Unsupported HEAD returns
@@ -233,7 +233,8 @@ rejection and sanitized server-error behavior match niche discovery.
 Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-resources.test.ts tests/v0.test.ts`
 checks real HTTP/PostgreSQL authentication, exact catalog/response allowlists,
 next-request key changes, duplicate credentials, isolated 401/404/422/injected-500,
-and legacy compatibility.
+legacy compatibility, full active/inactive detail allowlists, exact encoded IDs,
+UTC midnight/v0 agreement, and detail-query failures after authentication.
 
 ## Server configuration
 
