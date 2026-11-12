@@ -255,7 +255,19 @@ insertion marker is exposed.
 
 Default `newest` orders across brands by date descending, then bytewise ID
 ascending. `impressions` requires one brand and orders rank ascending, nulls last,
-then the same bytewise ID. Ranks cannot compare impression magnitudes across brands.
+then the same bytewise ID. Rank 1 is highest within that brand; gaps are retained,
+not renumbered. Null means unknown, not zero. Ranks are not impression counts and
+cannot compare impression magnitudes across brands or identify the highest-impression
+brand. Known ranks are unique within a brand; equal ranks in different brands do
+not imply equal impressions.
+
+To correct `sort=impressions` without a brand, add one known `brand_id` (as in the
+curl example above), or use `sort=newest` to search across brands. A valid but
+nonexistent brand returns an empty result, not a validation error. For niche
+corrections, replace `niche=Skincare` with `niche=skincare`, or
+`niche=Pet%20Supplies` with `niche=pet-supplies`; discover canonical values through
+`GET /api/v1/niches`. Corrections are advisory and never applied silently.
+
 Continuations may change page size or repeat equivalent normalized filters, but
 changed query meaning returns `CURSOR_QUERY_MISMATCH`. Tokens expire exactly 30
 minutes after page one, never renew, remain replayable and never replace auth.
@@ -271,12 +283,15 @@ from one current UTC time, not the first-page clock. Exhaustion does not subscri
 to later changes.
 
 Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-search.test.ts tests/v1-pagination.test.ts`
-passes 31 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
-walks, null transitions, tied dates/bytewise IDs, in-flight/later insertion
-exclusion, live deactivation, normalized continuation, replay, UTC rollover,
-fixed expiry, per-request authentication and sanitized no-store errors. Deeper
-adversarial rank/ingest coverage and OpenAPI verification remain later M3 tasks;
-these checks make no production-scale performance claim.
+passes 37 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
+walks, rank 1/gaps/cross-brand equal ranks, many bytewise null IDs, known-to-null
+and all-null pages, size changes, in-flight/later known and null insertion
+exclusion, live deactivation and newly inactive positions, normalized continuation,
+replay, UTC rollover, fixed expiry, per-request authentication and sanitized
+no-store errors. Removing the null-only continuation guard makes the adversarial
+walk fail on duplicate IDs; restoring it passes. No query defect was exposed.
+Actual-process ingest smoke coverage and OpenAPI verification remain later M3
+work; these checks make no production-scale performance claim.
 
 ### v1 ad detail
 

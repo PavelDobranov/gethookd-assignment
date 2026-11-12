@@ -216,12 +216,18 @@ it.each(["newest", "impressions"])(
     // The transaction is open before the HTTP request and commits only after page one.
     // Its insert has the same discovery timestamp and a backdated start date.
     const first = await writer.db.transaction(async (tx) => {
-      await tx.insert(ads).values({ ...ad("in-flight", 7), startDate: "2025-12-31" });
+      await tx.insert(ads).values([
+        { ...ad("in-flight", 7), startDate: "2025-12-31" },
+        { ...ad("in-flight-null"), startDate: "2025-12-31" },
+      ]);
       // Assign a later committed xid before B; a simple max-xid fence would fail.
       await connection.db.insert(ads).values(ad("b", 6));
       return page(query);
     });
-    await writer.db.insert(ads).values({ ...ad("later", 9), startDate: "2025-12-30" });
+    await writer.db.insert(ads).values([
+      { ...ad("later", 9), startDate: "2025-12-30" },
+      { ...ad("later-null"), startDate: "2025-12-30" },
+    ]);
     const remaining = await page(continuation(first.next_cursor));
     expect([first.data[0].id, ...remaining.data.map((row: { id: string }) => row.id)]).toEqual(
       sort === "newest" ? ["A", "Z", "a", "b", "z"] : ["A", "Z", "b", "a", "z"],
@@ -229,7 +235,9 @@ it.each(["newest", "impressions"])(
     expect(remaining.next_cursor).toBeNull();
     // They really committed and would match a new search.
     const fresh = await page(`brand_id=${brandId}&sort=${sort}`);
-    expect(fresh.data.map((row: { id: string }) => row.id)).toEqual(expect.arrayContaining(["in-flight", "later"]));
+    expect(fresh.data.map((row: { id: string }) => row.id)).toEqual(
+      expect.arrayContaining(["in-flight", "in-flight-null", "later", "later-null"]),
+    );
   },
 );
 
@@ -239,9 +247,11 @@ it.each(["newest", "impressions"])(
     const query = `brand_id=${brandId}&sort=${sort}&limit=1`;
     const active = await page(`${query}&status=active`);
     const all = await page(query);
-    await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" }).where(eq(ads.id, "Z"));
+    for (const id of ["Z", "a"]) {
+      await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" }).where(eq(ads.id, id));
+    }
     const activeRest = await page(continuation(active.next_cursor));
-    expect(activeRest.data.map((row: { id: string }) => row.id)).toEqual(["a", "z"]);
+    expect(activeRest.data.map((row: { id: string }) => row.id)).toEqual(["z"]);
     const allRest = await page(continuation(all.next_cursor));
     expect(allRest.data.map((row: { id: string }) => row.id)).toEqual(["Z", "a", "z"]);
     expect(allRest.data[0]).toMatchObject({ status: "inactive", days_active: 2 });
@@ -256,11 +266,34 @@ it.each(["newest", "impressions"])(
   },
 );
 
-it("replays tokens, retains fixed expiry, and expires at the exact boundary", async () => {
+it("observes newly inactive ranks and nulls only ahead of the impressions position", async () => {
+  for (const id of ["Z", "z"]) {
+    await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" }).where(eq(ads.id, id));
+  }
+  const first = await page(`sort=impressions&brand_id=${brandId}&status=inactive&limit=1`);
+  expect(first.data.map((row: { id: string }) => row.id)).toEqual(["Z"]);
+  expect(first.next_cursor).toEqual(expect.any(String));
+  // A is behind the known position; a becomes eligible ahead of it.
+  for (const id of ["A", "a"]) {
+    await writer.db.update(ads).set({ status: "inactive", endDate: "2026-01-03" }).where(eq(ads.id, id));
+  }
+  const second = await page(continuation(first.next_cursor, { limit: "1" }));
+  expect(second.data).toEqual([expect.objectContaining({ id: "a", status: "inactive", days_active: 2 })]);
+  // Deactivation behind the null position must not bring a known rank back.
+  const final = await page(continuation(second.next_cursor, { limit: "1" }));
+  expect(final.data.map((row: { id: string }) => row.id)).toEqual(["z"]);
+  expect(final.next_cursor).toBeNull();
+  expect(final.applied_filters).toEqual(first.applied_filters);
+  expect(final.cursor_expires_at).toBe(first.cursor_expires_at);
+  const fresh = await page(`sort=impressions&brand_id=${brandId}&status=inactive`);
+  expect(fresh.data.map((row: { id: string }) => row.id)).toEqual(["A", "Z", "a", "z"]);
+});
+
+it.each(["newest", "impressions"])("replays tokens with fixed expiry at the exact boundary: %s", async (sort) => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-01-02T23:59:59.999Z"));
   try {
-    const first = await page("limit=1");
+    const first = await page(`sort=${sort}&brand_id=${brandId}&limit=1`);
     expect(first.cursor_expires_at).toBe("2026-01-03T00:29:59.999Z");
     expect(first.data[0].days_active).toBe(1);
     vi.setSystemTime(new Date("2026-01-03T00:00:00.000Z"));
@@ -281,8 +314,8 @@ it("replays tokens, retains fixed expiry, and expires at the exact boundary", as
   }
 });
 
-it("authenticates continuations before validation and consults stored keys every time", async () => {
-  const first = await page("limit=1");
+it.each(["newest", "impressions"])("authenticates every continuation before validation: %s", async (sort) => {
+  const first = await page(`sort=${sort}&brand_id=${brandId}&limit=1`);
   await expectError(await request("cursor=invalid&limit=no", null), 401, "UNAUTHENTICATED");
   await expectError(await request(continuation(first.next_cursor), "Bearer invalid"), 401, "UNAUTHENTICATED");
   await connection.db
@@ -300,8 +333,8 @@ it("authenticates continuations before validation and consults stored keys every
   }
 });
 
-it("returns sanitized no-store cursor and database errors without logs or internal markers", async () => {
-  const first = await page("limit=1");
+it.each(["newest", "impressions"])("sanitizes no-store cursor and database errors: %s", async (sort) => {
+  const first = await page(`sort=${sort}&brand_id=${brandId}&limit=1`);
   const token: string = first.next_cursor;
   for (const cursor of ["", "not-a-token", token.slice(0, 20) + (token[20] === "A" ? "B" : "A") + token.slice(21)]) {
     await expectError(await request(continuation(cursor)), 422, "INVALID_CURSOR");

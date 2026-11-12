@@ -187,4 +187,14 @@ it("rejects impressions without a brand with actionable no-store errors", async 
   expect(body.error.code).toBe("VALIDATION_ERROR");
   expect(body.error.message).toContain("brand_id");
   expect(body.error.next_action).toContain("newest");
+  expect(body.error.next_action).toContain("brand_id");
+  expect(body.error.retryable).toBe(false);
+  expect(body.error.details).toEqual([
+    { parameter: "brand_id", reason: "required_for_impressions", allowed_values: [], suggestion: null },
+  ]);
+  // Both recommended corrections are usable, without silently comparing brands.
+  const local = await search(`sort=impressions&brand_id=${brandId}`);
+  expect(local.data.map((ad: { id: string }) => ad.id)).toEqual(["Z", "A", "a", "literal-decoy", "z"]);
+  const crossBrand = await search("sort=newest");
+  expect(crossBrand.data.map((ad: { id: string }) => ad.id)).toEqual(["A", "Z", "é", "a", "z", "literal-decoy"]);
 });
