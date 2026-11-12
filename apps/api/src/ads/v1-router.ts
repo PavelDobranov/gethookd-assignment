@@ -85,7 +85,7 @@ function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): Reques
 }
 
 function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursorSecret: string): RequestHandler {
-  const codec = createCursorCodec({ secret: cursorSecret });
+  const codec = createCursorCodec({ secret: cursorSecret, now: () => Date.now() });
   return async function handleSearch(req, res, next) {
     if (req.method !== "GET") {
       next();

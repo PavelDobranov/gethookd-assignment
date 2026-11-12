@@ -207,8 +207,75 @@ is retryable, after a short delay. Validation details contain `parameter`,
 `reason`, `allowed_values` and nullable `suggestion`; this endpoint accepts no
 query parameters, so its allowed-values list is empty. Unsupported HEAD returns
 404 headers without a body, as required by HTTP. v0 and portal errors are unchanged.
-Search, cursor HTTP errors and OpenAPI coverage remain later M3 slices;
-rate limiting remains M4 work.
+Search additionally returns `INVALID_CURSOR`, `CURSOR_EXPIRED` and
+`CURSOR_QUERY_MISMATCH` (422); retain the original query/token or start a fresh
+search as directed. OpenAPI coverage remains a later M3 slice; rate limiting
+remains M4 work.
+
+### v1 filtered search
+
+`GET /api/v1/ads` accepts only `q`, repeated `niche`, `format`, `status`,
+`started_after`, `brand_id`, `sort`, `limit` and `cursor`. Unknown names, duplicate
+scalars, invalid/empty enums, noncanonical niches, impossible dates and limits
+outside 1–100 return actionable 422 errors rather than silently broadening search.
+Keyword whitespace is trimmed (case preserved); matching is case-insensitive on
+headline OR body, with literal `%`, `_` and backslash. Repeated niches combine
+with OR, deduplicate and sort; every other filter combines with AND. Dates are
+strict `YYYY-MM-DD`, with **exclusive** `start_date > started_after` matching.
+
+```sh
+curl -sS -G http://localhost:3000/api/v1/ads \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2' \
+  --data-urlencode 'q=serum' --data-urlencode 'niche=skincare' \
+  --data-urlencode 'niche=haircare' --data-urlencode 'started_after=2026-01-01' \
+  --data-urlencode 'limit=2'
+
+# Rank 1 first within one brand; unknown ranks last. Not cross-brand impressions.
+curl -sS 'http://localhost:3000/api/v1/ads?sort=impressions&brand_id=1&limit=2' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+# Missing brand_id intentionally produces 422 with a correction.
+curl -i 'http://localhost:3000/api/v1/ads?sort=impressions' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+
+# Paste next_cursor from a response; omitted filters inherit the original query.
+CURSOR='<next_cursor>'
+curl -sS -G http://localhost:3000/api/v1/ads \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2' \
+  --data-urlencode "cursor=$CURSOR" --data-urlencode 'limit=10'
+```
+
+Responses contain `data` (the detail summary fields only, excluding body, end date,
+countries and discovery timestamp), normalized `applied_filters` (`q`, `niche`,
+`format`, `status`, `started_after`, `brand_id`), `sort`, effective `limit` (default
+20), nullable `next_cursor` and fixed UTC `cursor_expires_at`. Absent keyword is
+`""`, niches `[]`, other absent filters null. Empty/final pages have null cursors;
+empty pages retain the effective filters and expiry. No total or internal
+insertion marker is exposed.
+
+Default `newest` orders across brands by date descending, then bytewise ID
+ascending. `impressions` requires one brand and orders rank ascending, nulls last,
+then the same bytewise ID. Ranks cannot compare impression magnitudes across brands.
+Continuations may change page size or repeat equivalent normalized filters, but
+changed query meaning returns `CURSOR_QUERY_MISMATCH`. Tokens expire exactly 30
+minutes after page one, never renew, remain replayable and never replace auth.
+
+A short repeatable-read first page establishes insertion eligibility; continuations
+read live state while excluding all later-committed inserts, including backdated
+and already-in-flight inserts. Under supported ingest (inserts/deactivation, fixed
+ordering keys), forward walks do not repeat or skip initially matching ads that
+remain eligible. Unread deactivated ads disappear from active-filter searches but
+remain in unfiltered searches. Newly matching inactive ads have no completeness
+guarantee; start a fresh search for a new complete set. Each response computes days
+from one current UTC time, not the first-page clock. Exhaustion does not subscribe
+to later changes.
+
+Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-search.test.ts tests/v1-pagination.test.ts`
+passes 27 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
+walks, null transitions, tied dates/bytewise IDs, in-flight/later insertion
+exclusion, live deactivation, normalized continuation, replay, UTC rollover,
+fixed expiry, per-request authentication and sanitized no-store errors. Deeper
+adversarial rank/ingest coverage and OpenAPI verification remain later M3 tasks;
+these checks make no production-scale performance claim.
 
 ### v1 ad detail
 
@@ -302,7 +369,7 @@ imported by the web app.
 ### Cursor secret operations
 
 `CURSOR_SECRET` is server-only configuration passed through server/app/v1 router
-composition for the cursor codec; the search endpoint is not exposed yet. Never
+composition for the search cursor codec. Never
 reuse `JWT_SECRET` or API-key material, and never prefix this setting with `VITE_`
 or pass it to the web build. Neither startup path
 requires a `.env` file or manual secret setup for local development.
@@ -313,7 +380,7 @@ The same override is selected by `npm run dev` and `docker compose up --build`.
 Do not commit it, print it in logs, or share resolved Compose configuration.
 
 The v1 cursor contract requires a stable secret across ordinary API restarts and
-all API instances sharing a database. Once cursors are enabled, retaining the same
+all API instances sharing a database. Retaining the same
 secret and database history preserves otherwise valid, unexpired cursors; changing
 the secret invalidates existing cursors and clients must start fresh searches.
 After any database restore or replacement, rotate `CURSOR_SECRET` before serving
@@ -336,8 +403,8 @@ unsupported, tampered or wrong-secret tokens raise sanitized `INVALID_CURSOR`;
 at or after expiry, authenticated valid tokens raise `CURSOR_EXPIRED`. Both require
 an unmodified valid token or a fresh search, not a silent restart. Oversized
 server-generated state fails explicitly rather than truncating the snapshot; this
-bounds supported concurrent snapshot metadata, not the result count. These error
-codes remain internal until cursor-consuming HTTP endpoints are implemented.
+bounds supported concurrent snapshot metadata, not the result count. Search maps
+these errors to the v1 HTTP 422 envelope.
 
 Focused verification: `npm run test:unit -w @gethookd/api -- tests/v1-cursor.test.ts`
 covers both sorts, null ranks, replay/reconstruction, tampering, authenticated

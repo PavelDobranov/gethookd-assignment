@@ -77,6 +77,9 @@ async function search(query = "") {
 it.each([
   ["q=serum", ["A", "Z", "a", "z"]],
   ["q=50%25_%5C", ["A"]],
+  ["q=%25", ["A"]],
+  ["q=_", ["A"]],
+  ["q=%5C", ["A"]],
   ["niche=haircare", ["a"]],
   ["niche=haircare&niche=fitness", ["é", "a"]],
   ["format=image", ["a"]],
