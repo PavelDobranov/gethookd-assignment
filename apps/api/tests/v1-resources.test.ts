@@ -284,7 +284,7 @@ it.each(["/ads/%E0%A4%A", "/ads/%FF", "/niches/%ZZ"])("isolates malformed paths:
   ]);
 });
 
-it.each(["/missing", "/", "/ads", "/niches/extra"])("isolates unknown routes: %s", async (path) => {
+it.each(["/missing", "/", "/ads/unknown/route", "/niches/extra"])("isolates unknown routes: %s", async (path) => {
   const error = await expectError(await request(path), 404, "NOT_FOUND");
   expect(error.details).toEqual([]);
 });
