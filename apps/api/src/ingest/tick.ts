@@ -1,5 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { type Ad, adFormats, isCountryCode, niches } from "../ads/index.js";
+import { and, eq, inArray, lte, max } from "drizzle-orm";
+import { isCountryCode } from "../ads/index.js";
+import type { createDatabase } from "../db/client.js";
+import { ads, brands } from "../db/schema.js";
+import { createIngestAd } from "./ad.js";
 
 export function validateIngestCountries(
   countries: unknown,
@@ -9,33 +12,72 @@ export function validateIngestCountries(
   }
 }
 
-export function createIngestAd({
-  brandId,
-  now,
-  random,
-}: {
-  brandId: number;
-  now: Date;
-  random: () => number;
-}): Ad {
-  const niche = niches[Math.floor(random() * niches.length)];
-  const format = adFormats[Math.floor(random() * adFormats.length)];
-  const daysBack = random() < 0.3 ? 1 + Math.floor(random() * 90) : 0;
-  const start = new Date(now);
-  start.setUTCDate(start.getUTCDate() - daysBack);
-  return {
-    id: `ingest-ad-${randomUUID()}`,
-    brandId,
-    headline: `Discover ${niche.keywords[0]}`,
-    bodyText: `Explore our latest ${niche.name} collection.`,
-    niche: niche.slug,
-    format,
-    status: "active",
-    startDate: start.toISOString().slice(0, 10),
-    endDate: null,
-    // The transaction replaces this positive marker with the next brand-local rank.
-    impressionRank: random() < 0.4 ? null : 1,
-    countries: ["US", "GB"],
-    discoveredAt: now,
-  };
+// One caller/process owns scheduling; no concurrent ingest workers are supported.
+export async function runIngestTick(
+  db: ReturnType<typeof createDatabase>["db"],
+  {
+    clock = () => new Date(),
+    random = Math.random,
+  }: {
+    clock?: () => Date;
+    random?: () => number;
+  } = {},
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const now = clock();
+    const today = now.toISOString().slice(0, 10);
+    const insertCount = 1 + Math.floor(random() * 5);
+    const deactivateCount = 1 + Math.floor(random() * 2);
+    const availableBrands = await tx
+      .select({ id: brands.id })
+      .from(brands)
+      .orderBy(brands.id);
+    if (!availableBrands.length)
+      throw new Error("Ingest requires existing brands.");
+
+    // Materialize only IDs, in stable order so injected randomness controls selection.
+    // Future-starting active ads cannot receive a valid end date today.
+    const candidates = await tx
+      .select({ id: ads.id })
+      .from(ads)
+      .where(and(eq(ads.status, "active"), lte(ads.startDate, today)))
+      .orderBy(ads.id);
+    const selected: string[] = [];
+    while (selected.length < deactivateCount && candidates.length) {
+      const [candidate] = candidates.splice(
+        Math.floor(random() * candidates.length),
+        1,
+      );
+      selected.push(candidate.id);
+    }
+    if (selected.length) {
+      await tx
+        .update(ads)
+        .set({ status: "inactive", endDate: today })
+        .where(inArray(ads.id, selected));
+    }
+
+    const maxima = new Map(
+      (
+        await tx
+          .select({ brandId: ads.brandId, rank: max(ads.impressionRank) })
+          .from(ads)
+          .groupBy(ads.brandId)
+      ).map(({ brandId, rank }) => [brandId, rank ?? 0]),
+    );
+    for (let index = 0; index < insertCount; index++) {
+      const brand =
+        availableBrands[Math.floor(random() * availableBrands.length)];
+      const ad = createIngestAd({ brandId: brand.id, now, random });
+      validateIngestCountries(ad.countries);
+      if (ad.impressionRank !== null) {
+        const rank = (maxima.get(brand.id) ?? 0) + 1;
+        if (rank > 2_147_483_647)
+          throw new Error("Ingest rank space exhausted.");
+        ad.impressionRank = rank;
+        maxima.set(brand.id, rank);
+      }
+      await tx.insert(ads).values(ad);
+    }
+  });
 }

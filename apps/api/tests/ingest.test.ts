@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createIngestAd, validateIngestCountries } from "../src/ingest/tick.js";
+import { createIngestAd } from "../src/ingest/ad.js";
+import { validateIngestCountries } from "../src/ingest/tick.js";
 
 function sequence(...values: number[]) {
   return () => {
@@ -61,14 +62,15 @@ describe("controlled ingest fields", () => {
     expect(first.bodyText.length).toBeGreaterThan(0);
   });
 
-  it.each([null, "US", {}, ["US", "ZZ"], ["us"], [1], [null]])(
-    "rejects invalid country arrays/members: %j",
-    (countries) => {
-      expect(() => validateIngestCountries(countries)).toThrow(
-        "Invalid ingest countries",
-      );
-    },
-  );
+  it.each(
+    [null, "US", {}, ["US", "ZZ"], ["us"], [1], [null]].map((countries) => ({
+      countries,
+    })),
+  )("rejects invalid country arrays/members: $countries", ({ countries }) => {
+    expect(() => validateIngestCountries(countries)).toThrow(
+      "Invalid ingest countries",
+    );
+  });
   it("accepts arrays of valid ISO-2 codes", () => {
     expect(() => validateIngestCountries(["US", "GB"])).not.toThrow();
   });

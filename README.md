@@ -388,8 +388,40 @@ and stores the public key's hash against the actual demo user. Existing rows are
 never updated. Missing known-rank fixtures retain a free desired rank, or receive
 a deterministic fallback above both stored and full-fixture maxima; rank
 exhaustion fails and rolls back rather than renumbering or dropping fixtures.
-v0 HTTP authentication uses the stored hash on every request; live ingest remains
-a separate pending slice.
+v0 HTTP authentication uses the stored hash on every request. The atomic ingest
+operation below evolves this world without resetting fixtures.
+
+## Atomic ingest tick
+
+`apps/api/src/ingest/tick.ts` exports Express-independent
+`runIngestTick(db, { clock?, random? })`. Defaults use the current clock and
+`Math.random`; tests supply a clock and controlled draws in `[0, 1)`. Each tick
+uses one UTC time snapshot for dates and discovery timestamps, not the seed's
+reference date. It requires migrated storage and existing brands.
+
+One transaction selects 1–2 distinct random active ads that existed before the
+tick and started on/before today, deactivates the available remainder with today's
+UTC end date, and inserts 1–5 active ads with `ingest-ad-<UUID>` IDs. Same-tick
+inserts cannot be deactivated. Each insert uses an existing brand and the domain
+niche/format catalog; country-array shape and every ISO-2 member are validated
+before persistence. Draws below 0.30 backdate by 1–90 inclusive UTC days; otherwise
+the start date is today. Draws below 0.40 select a null rank; known ranks append
+above that brand's maximum, including inactive ads and earlier same-tick inserts.
+Existing ranks never change. Reaching rank `2147483647` is allowed; exhaustion
+fails the whole transaction rather than wrapping, renumbering or substituting null.
+Any failure rolls back all inserts and deactivations.
+
+```sh
+npm run test:unit -w @gethookd/api -- tests/ingest.test.ts
+npm run test:integration -w @gethookd/api -- tests/ingest-db.test.ts
+```
+
+Controlled tests cover probability thresholds, UTC boundaries, available candidate
+counts, valid new ads, brand-local allocation, integer exhaustion and real
+PostgreSQL rollback after an injected failure or invalid generated countries.
+This operation has no timer, listener or startup side effects. The explicit
+serial ingest process/command and its shutdown smoke check belong to #48; only
+one ingest process will be supported, with no multi-worker coordination.
 
 ## Legacy v0 parameter contract
 
