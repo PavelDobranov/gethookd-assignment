@@ -54,7 +54,14 @@ it("initializes an empty database then preserves changed credentials and unrelat
     });
   try {
     await initialize();
+    expect((await connection.db.select({ id: ads.id }).from(ads)).length).toBe(
+      20_000,
+    );
+    expect((await connection.db.select().from(brands)).length).toBe(300);
     const [demo] = await connection.db.select().from(users);
+    expect(
+      await validateApiKey(connection.db, "gethookd-public-demo-api-key-m2"),
+    ).toEqual({ userId: demo.id });
     expect(demo.username).toBe("demo");
     expect(await verifyPassword("demo-password", demo.passwordHash)).toBe(true);
     await connection.db
@@ -110,8 +117,13 @@ it("runs the seed command twice, closes connections and preserves the ID/hash", 
   expect(records).toHaveLength(1);
   expect(records[0].id).toBe(before.id);
   expect(records[0].passwordHash === before.passwordHash).toBe(true);
+  expect((await db.select({ id: ads.id }).from(ads)).length).toBe(20_000);
+  expect((await db.select().from(brands)).length).toBe(300);
+  expect(await validateApiKey(db, "gethookd-public-demo-api-key-m2")).toEqual({
+    userId: before.id,
+  });
   for (const output of [first, second]) {
-    expect(output.stdout).toContain("Demo user seed completed.");
+    expect(output.stdout).toContain("Database seed completed.");
     expect(output.stderr).toBe("");
     expect(output.stdout.includes(before.passwordHash)).toBe(false);
     expect(output.stdout.includes("demo-password")).toBe(false);
@@ -129,6 +141,34 @@ it("exits promptly with a safe actionable error on an unmigrated database", asyn
     ),
   });
 }, 10000);
+
+it("rolls back the entire command seed and sanitizes a late persistence failure", async () => {
+  await db.execute(sql`CREATE FUNCTION reject_seed_key() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'private-key-failure-sentinel'; END $$`);
+  await db.execute(sql`CREATE TRIGGER reject_seed_key BEFORE INSERT ON api_keys
+    FOR EACH ROW EXECUTE FUNCTION reject_seed_key()`);
+  try {
+    const failure: unknown = await runSeed().catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      code: 1,
+      killed: false,
+      stdout: expect.not.stringContaining("Database seed completed."),
+      stderr: expect.stringContaining("Database seeding failed."),
+    });
+    expect(failure).not.toMatchObject({
+      stderr: expect.stringContaining("private-key-failure-sentinel"),
+    });
+    expect(failure).not.toMatchObject({
+      stderr: expect.stringContaining("gethookd-public-demo-api-key-m2"),
+    });
+    for (const table of [users, brands, ads, apiKeys]) {
+      expect(await db.select().from(table)).toEqual([]);
+    }
+  } finally {
+    await db.execute(sql`DROP TRIGGER reject_seed_key ON api_keys`);
+    await db.execute(sql`DROP FUNCTION reject_seed_key()`);
+  }
+}, 20000);
 
 it("reports invalid configuration without exposing its value", async () => {
   await expect(
@@ -280,9 +320,13 @@ it("repairs an occupied missing-fixture rank above both existing and full-fixtur
   if (!ranked || ranked.impressionRank === null)
     throw new Error("Expected ranked fixture");
   const occupied = { ...ranked, id: "ingest-shaped-ad" };
-  await db.insert(brands).values(fixtures.brands);
+  const brandFixtures = {
+    brands: fixtures.brands.filter((brand) => brand.id === ranked.brandId),
+    ads: fixtures.ads.filter((ad) => ad.brandId === ranked.brandId),
+  };
+  await db.insert(brands).values(brandFixtures.brands);
   await db.insert(ads).values(occupied);
-  await seedDatabase(db);
+  await db.transaction((tx) => seedWorld(tx, brandFixtures));
   const [repaired] = await db.select().from(ads).where(eq(ads.id, ranked.id));
   const maximum = Math.max(
     ...fixtures.ads
@@ -293,15 +337,21 @@ it("repairs an occupied missing-fixture rank above both existing and full-fixtur
   expect(await db.select().from(ads).where(eq(ads.id, occupied.id))).toEqual([
     occupied,
   ]);
-  await seedDatabase(db);
+  await db.transaction((tx) => seedWorld(tx, brandFixtures));
   expect(await db.select().from(ads).where(eq(ads.id, ranked.id))).toEqual([
     repaired,
   ]);
 });
 
-it.each([null, "US", ["US", "XX"], ["us"], [42]])(
+it.each([
+  { countries: null },
+  { countries: "US" },
+  { countries: ["US", "XX"] },
+  { countries: ["us"] },
+  { countries: [42] },
+])(
   "rejects invalid country arrays before world persistence (case %#)",
-  async (countries) => {
+  async ({ countries }) => {
     const fixtures = generateFixtures();
     Object.assign(fixtures.ads[0], { countries });
     await expect(

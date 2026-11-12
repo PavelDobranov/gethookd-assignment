@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("drizzle-orm/node-postgres/migrator", () => ({
   migrate: mocks.migrate,
 }));
-vi.mock("../src/db/seed.js", () => ({ seedDemoUser: mocks.seed }));
+vi.mock("../src/db/seed.js", () => ({ seedDatabase: mocks.seed }));
 vi.mock("../src/db/client.js", () => ({
   createDatabase: () => ({ db: {}, close: mocks.close }),
 }));
@@ -101,7 +101,7 @@ it("bounds subprocess execution and rejects nonzero exits", async () => {
   ).rejects.toThrow("Command failed or timed out.");
 });
 
-it("initializes in migration, seed, close order", async () => {
+it("initializes in migration, shared world seed, close order", async () => {
   const stages: string[] = [];
   mocks.migrate.mockImplementation(async () => {
     stages.push("migrate");

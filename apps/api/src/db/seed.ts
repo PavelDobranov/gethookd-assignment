@@ -46,11 +46,11 @@ if (
   try {
     const { db, close } = createDatabase(loadConfig().databaseUrl);
     try {
-      await seedDemoUser(db);
+      await seedDatabase(db);
     } finally {
       await close();
     }
-    console.info("Demo user seed completed.");
+    console.info("Database seed completed.");
   } catch {
     // Do not print connection URLs, SQL parameters or password hashes.
     console.error(

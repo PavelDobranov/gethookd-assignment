@@ -24,7 +24,7 @@ The built-web Docker workflow below provides the same routes at port 8080.
 
 `setup` starts **only** Compose `db`, waits up to 30 seconds for healthy TCP
 readiness (120-second overall provisioning deadline, including image acquisition),
-then runs the shared committed-migration → demo-seed initializer with a 60-second
+then runs the shared committed-migration → world-seed initializer with a 60-second
 deadline. It never generates migrations or launches API, Vite or Studio. Repeats
 preserve all data and existing credentials. Run initializers sequentially, not in
 parallel. On timeout, cancellation or failure, later stages do not run; diagnostics
@@ -41,7 +41,7 @@ Explicit root commands forward to installed workspace-local tooling:
 ```sh
 npm run db:generate  # Generate migrations for review/commit, never during startup
 npm run db:migrate   # Drizzle Kit applies committed pending migrations only
-npm run db:seed      # Insert demo only if absent; never reset credentials
+npm run db:seed      # Add missing demo user, brands, ads and public key; preserve data
 npm run db:studio    # Explicit local Studio, 127.0.0.1:4983; stop with Ctrl+C
 ```
 
@@ -60,8 +60,9 @@ docker compose up --build
 
 Open `http://localhost:8080` and sign in with `demo` / `demo-password` (unless
 that user's password was deliberately changed). PostgreSQL must become healthy
-before the one-shot `setup` service applies committed migrations and seeds. Setup
-must exit successfully before API startup; API health gates the built web server.
+before the one-shot `setup` service applies committed migrations and seeds the
+world. Setup must exit successfully before API startup; API health gates the built
+web server.
 A failed setup blocks API/web startup: inspect `docker compose logs setup` and
 correct configuration/readiness rather than deleting data. There is no Studio
 service. DB/API/web published ports bind to loopback only (5432/3000/8080).
@@ -240,7 +241,7 @@ container is required before running the suite.
 ```sh
 npm run db:generate -w @gethookd/api  # Generate SQL/metadata for review and commit
 npm run db:migrate -w @gethookd/api   # Apply committed migrations to configured DB
-npm run db:seed -w @gethookd/api      # Insert the demo user only if absent
+npm run db:seed -w @gethookd/api      # Add missing demo user, world fixtures and key
 npm run test -w @gethookd/api -- tests/db.test.ts  # Isolated migration/read/write tests
 ```
 
@@ -275,7 +276,7 @@ advisory concerns esbuild's development server, which these generate/migrate
 commands do not launch. Do not expose such a server; no forced downgrade or
 unreviewed dependency override is applied.
 
-### Demo user seeding
+### Repeat-safe world and demo seeding
 
 After migrations, run `npm run db:seed -w @gethookd/api`. Public local credentials
 are username **`demo`**, password **`demo-password`**; only a randomly salted
@@ -285,26 +286,35 @@ nonzero with a safe diagnostic if configuration or database access fails. It doe
 not generate or apply migrations. No passwords, hashes or connection URLs are
 printed.
 
-`src/db/seed.ts` exports reusable `seedDemoUser(db)`; imported callers retain
-ownership of their database connection. `src/db/initialize.ts` owns one pool and
-uses Drizzle's PostgreSQL migrator to apply the same committed SQL/history as
+`src/db/seed.ts` exports shared `seedDatabase(db)`, used by both `db:seed` and
+the initializer, plus the user-only `seedDemoUser(db)` primitive. Imported callers
+retain ownership of their database connection. The shared operation inserts the
+missing demo user, 300 brands, 20,000 ads and public API-key hash in one
+transaction. It resolves the actual existing demo ID and preserves existing key
+records, including their IDs and owners. Any persistence failure rolls back the
+entire seed; it never reports partial seed success. `src/db/initialize.ts` owns one
+pool and uses Drizzle's PostgreSQL migrator to apply the same committed SQL/history as
 Drizzle Kit, then seeds and closes the pool even on failure. Migration paths are
 resolved from the module, independently of the working directory, for source and
 compiled execution. Both local setup and the one-shot Compose setup entry point
 use this initializer; API startup never imports or runs it.
 Database uniqueness and insert-on-conflict handling leave an existing demo ID and
 exact hash untouched. Repeated seeding and setup never reset
-a deliberately changed password or changes unrelated users. The documented demo
+a deliberately changed password or change unrelated users. The documented demo
 password therefore stops working if someone deliberately changes it.
 
 ```sh
-npm run test -w @gethookd/api -- tests/seed.test.ts
+npm run test:integration -w @gethookd/api -- tests/seed.test.ts tests/db.test.ts
 ```
 
 Tests use a separate database inside the disposable PostgreSQL project, covering
-empty/repeated seeding, changed credentials, unrelated records and two real CLI
-runs with ID/hash preservation. Unmigrated-database and invalid-configuration
-checks require prompt nonzero exits without exposing sensitive details.
+empty/repeated seeding, changed credentials/world rows, missing fixtures, occupied
+rank repair and two real seed/initializer CLI runs with ID/hash preservation.
+Country validation rejects malformed arrays and invalid ISO-2 members. A late
+key-insert failure proves full transaction rollback and sanitized nonzero command
+exit. Unmigrated-database and invalid-configuration checks also require prompt
+nonzero exits without exposing sensitive details. Tests report actual timings for
+the 40 batches of 500 ads; two-second query/statement limits stay in force.
 
 ## Deterministic ad-domain fixtures
 
@@ -330,16 +340,14 @@ npm run test:unit -w @gethookd/api -- tests/ads-model.test.ts tests/fixtures.tes
 
 These tests cover UTC boundaries, invalid countries, complete fixture equality
 under different clocks, exact distributions, keywords and per-record invariants.
-The generator does not write to PostgreSQL. The storage schema below is available;
-integration of fixtures with setup/seed, v0 HTTP authentication and live ingest
-remain separate pending slices. Setup and `db:seed` currently seed
-only the demo user. The shared `seedDatabase(db)` operation is available for
-transactional world persistence; command/initializer integration is separate.
+The generator does not write to PostgreSQL. Setup and `db:seed` persist its
+fixtures through the shared transactional `seedDatabase(db)` operation.
 It validates fixture country arrays, inserts missing brands/ads in batches of 500,
 and stores the public key's hash against the actual demo user. Existing rows are
 never updated. Missing known-rank fixtures retain a free desired rank, or receive
 a deterministic fallback above both stored and full-fixture maxima; rank
 exhaustion fails and rolls back rather than renumbering or dropping fixtures.
+v0 HTTP authentication and live ingest remain separate pending slices.
 
 ## Ad and API-key storage
 
@@ -360,7 +368,8 @@ is validated in the application, not through a database country table.
 required `key_hash`; no plaintext or lifecycle metadata is stored. Foreign keys
 prevent deletion of a referenced brand/user rather than silently removing ads/keys.
 The migration provides storage; the stored-key operations below provide hashing
-and validation. Key seeding and HTTP authentication are not wired yet.
+and validation. The shared seed inserts the public development key's hash;
+HTTP authentication is not wired yet.
 
 ```sh
 npm run test:integration -w @gethookd/api -- tests/db.test.ts tests/world-model.test.ts
@@ -388,9 +397,9 @@ and unchanged.
 The public development fixture is **`gethookd-public-demo-api-key-m2`**, whose
 SHA-256 digest is
 `58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47`.
-It is public, development-only, and not a production secret. Setup does not seed
-it yet, and no API-key HTTP endpoint is available. Future managed keys require
-cryptographically random secrets; these operations add no key management,
+It is public, development-only, and not a production secret. Setup and `db:seed`
+insert its hash if missing; no API-key HTTP endpoint is available. Future managed
+keys require cryptographically random secrets; these operations add no key management,
 scopes, rate limits or metering.
 
 ```sh

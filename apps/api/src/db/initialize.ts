@@ -2,7 +2,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { loadConfig } from "../config.js";
 import { createDatabase } from "./client.js";
-import { seedDemoUser } from "./seed.js";
+import { seedDatabase } from "./seed.js";
 
 export async function initializeDatabase(databaseUrl: string) {
   const { db, close } = createDatabase(databaseUrl);
@@ -14,7 +14,7 @@ export async function initializeDatabase(databaseUrl: string) {
       ),
     });
     stage = "seed";
-    await seedDemoUser(db);
+    await seedDatabase(db);
   } catch {
     throw new Error(`Database initialization failed during ${stage}.`);
   } finally {
