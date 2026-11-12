@@ -217,7 +217,7 @@ search cursors. Encode the exact opaque string ID as one URL path segment; IDs
 are not numbers and are not trimmed or normalized. No query parameters are accepted.
 
 ```sh
-curl -i 'http://localhost:3000/api/v1/ads/ad-example' \
+curl -i 'http://localhost:3000/api/v1/ads/seed-ad-000001' \
   -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
 ```
 
