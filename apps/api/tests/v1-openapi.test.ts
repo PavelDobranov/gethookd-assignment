@@ -250,6 +250,177 @@ it("validates missing-route/ad 404 and resource/path validation 422 over HTTP", 
   }
 });
 
+it.each<[string, string, unknown, boolean]>([
+  ["q", "  Serum  ", "Serum", true],
+  ["q", "   ", "", true],
+  ["q", "🦊".repeat(500), "🦊".repeat(500), true],
+  ["q", "x".repeat(501), "x".repeat(501), false],
+  ["q", "\u0000", "\u0000", false],
+  ["niche", "skincare", ["skincare"], true],
+  ["niche", "Skincare", ["Skincare"], false],
+  ["niche", "Pet Supplies", ["Pet Supplies"], false],
+  ["niche", "skincare,haircare", ["skincare,haircare"], false],
+  ["niche", "", [""], false],
+  ["format", "carousel", "carousel", true],
+  ["format", "Video", "Video", false],
+  ["format", "", "", false],
+  ["status", "active", "active", true],
+  ["status", "Active", "Active", false],
+  ["status", "", "", false],
+  ["started_after", "2024-02-29", "2024-02-29", true],
+  ["started_after", "0001-01-01", "0001-01-01", true],
+  ["started_after", "9999-12-31", "9999-12-31", true],
+  ["started_after", "0000-01-01", "0000-01-01", false],
+  ["started_after", "2026-02-30", "2026-02-30", false],
+  ["started_after", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", false],
+  ["brand_id", "0001", 1, true],
+  ["brand_id", "2147483647", 2147483647, true],
+  ["brand_id", "2147483648", 2147483648, false],
+  ["brand_id", "0", 0, false],
+  ["brand_id", "+1", "+1", false],
+  ["brand_id", " 1", " 1", false],
+  ["brand_id", "1.0", "1.0", false],
+  ["brand_id", "1e1", "1e1", false],
+  ["sort", "newest", "newest", true],
+  ["sort", "Newest", "Newest", false],
+  ["sort", "", "", false],
+  ["limit", "01", 1, true],
+  ["limit", "100", 100, true],
+  ["limit", "0", 0, false],
+  ["limit", "101", 101, false],
+  ["limit", "", "", false],
+  ["limit", "1.5", "1.5", false],
+  ["cursor", "", "", false],
+  ["cursor", "!", "!", false],
+  ["cursor", "x".repeat(4097), "x".repeat(4097), false],
+])("agrees on documented %s request constraints", async (name, wire, normalized, valid) => {
+  const parameter = contract.paths["/api/v1/ads"].get.parameters?.find((entry) => entry.name === name);
+  if (!parameter) throw new Error(`Missing documented parameter ${name}`);
+  expect(validate.parameter(parameter)(normalized)).toBe(valid);
+  const query = new URLSearchParams({ [name]: wire });
+  if (valid) await search(query.toString());
+  else
+    await expectError(
+      `/api/v1/ads?${query}`,
+      "/api/v1/ads",
+      422,
+      name === "cursor" ? "INVALID_CURSOR" : "VALIDATION_ERROR",
+    );
+});
+
+it("pins repeated-niche serialization, scalar uniqueness, exact names and the cross-field brand rule", async () => {
+  const parameters = contract.paths["/api/v1/ads"].get.parameters ?? [];
+  expect(parameters.map(({ name }) => name)).toEqual([
+    "q",
+    "niche",
+    "format",
+    "status",
+    "started_after",
+    "brand_id",
+    "sort",
+    "limit",
+    "cursor",
+  ]);
+  expect(parameters.every((entry) => entry.in === "query" && !entry.required)).toBe(true);
+  expect(parameters.find(({ name }) => name === "niche")).toMatchObject({ style: "form", explode: true });
+  const repeated = await search("niche=skincare&niche=haircare&niche=skincare");
+  expect(repeated.applied_filters.niche).toEqual(["haircare", "skincare"]);
+  for (const query of [
+    "niche[]=skincare",
+    "niche[x]=skincare",
+    "niche=skincare&niche=",
+    "nich=skincare",
+    "Q=x",
+    "page=1",
+    "per_page=1",
+    "api_key=x",
+    "sort=impressions",
+  ]) {
+    await expectError(`/api/v1/ads?${query}`, "/api/v1/ads", 422, "VALIDATION_ERROR");
+  }
+  for (const { name } of parameters.filter(({ name }) => name !== "niche")) {
+    await expectError(`/api/v1/ads?${name}=x&${name}=x`, "/api/v1/ads", 422, "VALIDATION_ERROR");
+  }
+  await search(`sort=impressions&brand_id=${brandId}`);
+  await expectError("/api/v1/ads?api_key=x", "/api/v1/ads", 401, "UNAUTHENTICATED", null);
+});
+
+it("validates genuine continuation tokens, query mismatch, tampering and the exact expiry boundary", async () => {
+  const first = await search("limit=1");
+  const token = first.next_cursor;
+  if (token === null) throw new Error("Expected a continuation cursor");
+  const cursorParameter = contract.paths["/api/v1/ads"].get.parameters?.find(({ name }) => name === "cursor");
+  if (!cursorParameter) throw new Error("Missing cursor schema");
+  expect(validate.parameter(cursorParameter)(token)).toBe(true);
+  await search(`cursor=${token}&limit=2`);
+  await expectError(`/api/v1/ads?cursor=${token}&q=changed`, "/api/v1/ads", 422, "CURSOR_QUERY_MISMATCH");
+  const tampered = token.slice(0, -4) + (token.endsWith("AAAA") ? "BBBB" : "AAAA");
+  await expectError(`/api/v1/ads?cursor=${tampered}`, "/api/v1/ads", 422, "INVALID_CURSOR");
+  await expectError("/api/v1/ads?cursor=syntactically_valid_but_unsupported", "/api/v1/ads", 422, "INVALID_CURSOR");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(first.cursor_expires_at));
+    await expectError(`/api/v1/ads?cursor=${token}`, "/api/v1/ads", 422, "CURSOR_EXPIRED");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("validates a search execution failure rather than confusing it with authentication or empty results", async () => {
+  const spy = vi.spyOn(connection.db, "transaction").mockRejectedValueOnce(new Error("private query sentinel"));
+  try {
+    const body = await expectError("/api/v1/ads", "/api/v1/ads", 500, "INTERNAL_ERROR");
+    expect(JSON.stringify(body)).not.toContain("private query sentinel");
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+it.each(["required-field", "enum", "status", "nested-schema"])(
+  "detects incompatible %s artifact drift against actual HTTP output",
+  async (drift) => {
+    const actual = await search("limit=1");
+    const incompatible = structuredClone(contract);
+    if (drift === "required-field") {
+      incompatible.components.schemas.SearchResponse.required = ["nonexistent_required_field"];
+    } else if (drift === "enum") {
+      incompatible.components.schemas.Sort.enum = ["unimplemented"];
+    } else if (drift === "status") {
+      const responses = incompatible.paths["/api/v1/ads"].get.responses;
+      responses["201"] = responses["200"];
+      delete responses["200"];
+    } else {
+      const properties = incompatible.components.schemas.AdSummary.properties as Record<string, Schema>;
+      properties.headline.type = "integer";
+    }
+    const incompatibleValidators = validators(incompatible);
+    if (drift === "status") {
+      expect(() => incompatibleValidators.response("/api/v1/ads", 200)).toThrow(
+        "Undocumented GET /api/v1/ads status 200",
+      );
+    } else {
+      expect(incompatibleValidators.response("/api/v1/ads", 200)(actual)).toBe(false);
+    }
+  },
+);
+
+it("rejects extra public fields, missing fields, invalid formats and broken nullability in runtime bodies", async () => {
+  const detail = (await request("/api/v1/ads/A", "/api/v1/ads/{id}")) as { data: Record<string, unknown> };
+  const accepts = validate.response("/api/v1/ads/{id}", 200);
+  for (const change of [
+    { internal_secret: "not public" },
+    { headline: null },
+    { countries: null },
+    { discovered_at: "not-a-date" },
+    { end_date: "2026-02-30" },
+  ]) {
+    expect(accepts({ data: { ...detail.data, ...change } })).toBe(false);
+  }
+  const missing = structuredClone(detail);
+  delete missing.data.body_text;
+  expect(accepts(missing)).toBe(false);
+});
+
 it("compiles every documented response with draft-2020-12 formats and local references", () => {
   expect(contract.openapi).toMatch(/^3\.1\./);
   expect(Object.keys(contract.paths)).toEqual(paths);

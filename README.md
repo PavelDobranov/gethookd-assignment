@@ -308,9 +308,25 @@ two-second query/connection deadlines and leaves the pool usable. Disabling the
 insertion-visibility predicate makes all six controlled walks fail; restoring it
 passes. Removing the null-only continuation guard also fails on duplicate IDs.
 No production correction was needed. The cursor unit suite passes 95 tests.
-Actual-process ingest smoke coverage and OpenAPI verification remain later M3
-work; HTTP app recreation is not an OS-process restart test. These checks make no
-production-scale performance claim.
+Actual-process ingest smoke coverage remains later M3 work; HTTP app recreation
+is not an OS-process restart test. These checks make no production-scale
+performance claim.
+
+### v1 OpenAPI contract
+
+[OpenAPI 3.1](docs/openapi/v1.yaml) defines search, detail and niche discovery,
+Bearer authentication, strict inputs, response allowlists and current errors.
+Repeated niches use `style: form` with `explode: true`, not commas or brackets.
+The impressions/brand cross-field rule and live cursor guarantees are documented
+alongside the schemas. Rate limiting/429 remains M4 work.
+
+Run `npm run test:integration -w @gethookd/api -- tests/v1-openapi.test.ts` for
+real HTTP/PostgreSQL checks against the artifact using test-only YAML, Ajv2020 and
+format validation. The suite checks populated/empty/null responses, every current
+error code, request constraints and filter-sensitive fixtures. Drift probes reject
+incompatible required fields, enums, statuses and nested schemas; changing the
+artifact's sort enum to an unsupported value also makes the actual HTTP check fail.
+The root `npm test` includes this suite. Existing v0 and portal contracts are unchanged.
 
 ### v1 ad detail
 
