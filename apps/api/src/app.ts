@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 
 import { createAdsRouter } from "./ads/router.js";
+import { createV1Router } from "./ads/v1-router.js";
 import { createAuthRouter } from "./auth/index.js";
 import type { createDatabase } from "./db/client.js";
 import { createHealthRouter } from "./health/router.js";
@@ -19,6 +20,8 @@ export function createApp({ db, jwtSecret }: AppDependencies): Express {
   app.use("/api/auth", createAuthRouter({ db, jwtSecret }));
 
   app.use("/api/v0", createAdsRouter({ db }));
+
+  app.use("/api/v1", createV1Router({ db }));
 
   app.use(handleErrors);
 
