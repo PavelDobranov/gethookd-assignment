@@ -331,8 +331,8 @@ npm run test:unit -w @gethookd/api -- tests/ads-model.test.ts tests/fixtures.tes
 These tests cover UTC boundaries, invalid countries, complete fixture equality
 under different clocks, exact distributions, keywords and per-record invariants.
 The generator does not write to PostgreSQL. The storage schema below is available;
-integration of fixtures with setup/seed, stored-key authentication, v0 HTTP and
-live ingest remain separate pending slices. Setup and `db:seed` currently seed
+integration of fixtures with setup/seed, v0 HTTP authentication and live ingest
+remain separate pending slices. Setup and `db:seed` currently seed
 only the demo user.
 
 ## Ad and API-key storage
@@ -353,8 +353,8 @@ is validated in the application, not through a database country table.
 `api_keys` stores only a generated UUID ID, required user reference, and unique
 required `key_hash`; no plaintext or lifecycle metadata is stored. Foreign keys
 prevent deletion of a referenced brand/user rather than silently removing ads/keys.
-This is storage only: key hashing, key seeding and request authentication are not
-implemented by this migration.
+The migration provides storage; the stored-key operations below provide hashing
+and validation. Key seeding and HTTP authentication are not wired yet.
 
 ```sh
 npm run test:integration -w @gethookd/api -- tests/db.test.ts tests/world-model.test.ts
@@ -365,6 +365,36 @@ fixture round-trips, empty-database migration, M1 upgrades with exact user
 preservation, and migration replay preserving world data. Ledger checks compare
 all committed SQL hashes and journal timestamps and retain exact replay equality.
 No developer database is used.
+
+## Stored API-key operations
+
+`apps/api/src/api-keys/index.ts` exports `hashApiKey(key)` and
+`validateApiKey(db, key)`. Hashing uses Node crypto SHA-256 with lowercase
+hexadecimal output. Store only the digest and the actual owning user's ID in
+`api_keys`; never store or log the raw key. Validation accepts a nonempty string
+without trimming or case folding and performs a parameterized PostgreSQL lookup
+on every call, with no credential cache. It returns `{ userId }` for a matching
+stored hash or `null` for missing, empty, non-string or unmatched input. Database
+failures propagate; callers must map them to sanitized errors, never successful
+authentication or raw database diagnostics. Portal JWT authentication is separate
+and unchanged.
+
+The public development fixture is **`gethookd-public-demo-api-key-m2`**, whose
+SHA-256 digest is
+`58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47`.
+It is public, development-only, and not a production secret. Setup does not seed
+it yet, and no API-key HTTP endpoint is available. Future managed keys require
+cryptographically random secrets; these operations add no key management,
+scopes, rate limits or metering.
+
+```sh
+npm run test:unit -w @gethookd/api -- tests/api-key-hash.test.ts
+npm run test:integration -w @gethookd/api -- tests/api-keys.test.ts
+```
+
+The isolated PostgreSQL tests verify hash-only storage and actual ownership,
+invalid input, changed/deleted hashes and owners between calls, and failure after
+a previously successful lookup loses its database connection.
 
 ## Password hashing primitive
 
