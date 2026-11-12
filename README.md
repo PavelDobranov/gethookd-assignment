@@ -72,6 +72,24 @@ API, and serves the SPA for `/portal` deep links and refresh. Unknown API paths
 retain the API's 404 response, never the SPA fallback. `/api/auth/me` failures
 retain JSON errors/statuses. Auth responses remain non-cacheable.
 
+### Credential-safe Nginx logging
+
+The built-web Nginx server explicitly sets `access_log off;` and
+`error_log /dev/null;`, inherited by every location without overrides. This
+local-demo policy intentionally discards access and request-error diagnostics:
+native error logs can include raw URLs containing `api_key`, even when access
+logging is disabled. Do not re-enable location logging or rely on Nginx logs to
+diagnose request/upstream failures. Startup/configuration diagnostics are not
+guaranteed to remain available either. Application logging remains sanitized;
+never log keys, raw request URLs or raw database errors.
+
+`npm run test:unit -w @gethookd/api -- tests/logging-config.test.ts` pins the
+server directives/inheritance, API proxy paths/status forwarding and SPA fallback.
+Validate the built Nginx configuration at runtime. Once the v0 endpoint exists,
+Gate C and final workflow acceptance must check application and Nginx logs for
+key-bearing success, rejection and upstream-failure requests using public test
+sentinels only, without dumping raw requests or private secrets into evidence.
+
 ```sh
 docker compose down           # Stop/remove containers and network, KEEP DB data
 docker compose up --build     # Reapply pending migrations; preserve users/data
