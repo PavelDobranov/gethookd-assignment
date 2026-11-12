@@ -3,8 +3,8 @@
 ## Status
 
 Accepted design in [plan #55](https://github.com/PavelDobranov/gethookd-assignment/issues/55).
-The database primitive is implemented and tested in #56/#57; human feasibility
-review at #58 remains required before subsequent cursor/HTTP work.
+Implemented through #56–#69; feasibility and search review gates #58–#70 are
+closed. Final milestone acceptance remains a separate human review (#73).
 
 ## Date
 
@@ -61,12 +61,42 @@ keeps capture and the first page coherent despite intervening commits.
   metadata, not part of the public ad domain or response allowlists.
 - Snapshot text retains no historical tuples or server resources. Current status
   changes can remove active matches or create inactive matches ahead of the walk;
-  this is not a frozen result set. Keyset/expiry/token guarantees require later
-  tasks, not this primitive alone.
+  this is not a frozen result set. Search combines membership with live filters,
+  `start_date DESC, id COLLATE "C" ASC` for newest, or brand-local rank ascending,
+  nulls last, then the same bytewise ID for impressions. Continuation predicates
+  use the same order and handle the known-to-null transition.
 - Snapshot size grows with concurrent transactions; the approved bounded cursor
-  envelope must reject oversize state rather than truncate it. Restore/replacement
-  requires cursor-secret rotation. Encryption, validation and the 30-minute expiry
-  belong to subsequent tasks; no HTTP/token implementation is claimed here.
+  envelope rejects oversize state rather than truncating it. This limits supported
+  snapshot concurrency, not the number of results. Server-generated oversize state
+  returns sanitized 500; oversized client tokens return 422 `INVALID_CURSOR`.
+- `ads/cursor.ts` encrypts/authenticates normalized filters/sort, snapshot, last
+  position and original timestamps with AES-256-GCM: domain-separated SHA-256 key
+  derivation, fresh 12-byte nonce, 16-byte tag and authenticated version context.
+  The ASCII base64url envelope is bounded to 4096 characters in both directions.
+  It contains no credentials or result lists. Authentication precedes decoding;
+  authenticated state validation precedes expiry diagnostics.
+- Expiry is exactly 30 minutes from page-one start, without renewal. Omitted
+  continuation filters inherit originals; equivalent normalized repeats and page
+  size changes are allowed, changed query meaning is not. Invalid/tampered or
+  wrong-secret tokens return actionable 422 `INVALID_CURSOR`; at/after expiry,
+  valid authenticated tokens return `CURSOR_EXPIRED`. Tokens never authorize reads:
+  every request checks the stored Bearer API key again and returns no-store.
+- A forward walk excludes every post-boundary insert, including in-flight and
+  backdated inserts, and returns every initially matching, continuously eligible
+  ad once. Deactivation can remove unread active matches; without a status filter
+  it does not remove them. Newly matching inactive ads may appear ahead of the
+  current position but have no completeness guarantee. Fields/days reflect one
+  coherent current page read/time. Replays are allowed, not byte-stable snapshots;
+  exhaustion does not subscribe to subsequent changes. Arbitrary ordering-key
+  edits, deletion, reactivation and multiple ingest workers are unsupported.
+- `CURSOR_SECRET` is separate from JWT/API credentials, server-only and stable
+  across API processes sharing database history. Both local setup/dev and Compose
+  work without `.env` using the documented public development-only default;
+  private overrides require at least 32 UTF-8 bytes. Ordinary same-secret restarts
+  preserve unexpired cursors. Secret changes invalidate them; clients start fresh.
+  After **any database restore or replacement**, rotate it before serving reads;
+  historical transaction provenance cannot safely be carried across histories.
+  There is no registry, cleanup worker or retained walk transaction.
 - `npm run test:integration -w @gethookd/api -- tests/v1-visibility.test.ts
   --reporter=verbose --silent=false` passes seven real-PostgreSQL tests. Explicit
   transaction ordering proves commit-before/after-B, an in-flight savepoint insert,
@@ -80,3 +110,16 @@ keeps capture and the first page coherent despite intervening commits.
   count. Existing 2-second statement/query deadlines remain unchanged. These are
   local feasibility observations, not production-scale benchmarks or full-search
   query plans; no search-order index or 110-million-row performance claim follows.
+- Deterministic `v1-pagination.test.ts` exercises real ingest transactions paused
+  before commit while page one runs separately, both sorts and live deactivation,
+  null/tied traversal, replay/expiry and released connections. These tests prove
+  races/backdating; random process smoke results do not.
+- On 2026-11-12, #72 exercised actual no-`.env` local and full-Docker startup,
+  repeat initialization after live ingest, and M2-to-M3 upgrades on isolated
+  PostgreSQL 17.11. Both upgrades backfilled 20,001 evolved ads with one non-null
+  migration marker, preserving all business fields/users/keys; new inserts
+  received their current top-level transaction ID by default. Real API process
+  restarts preserved tokens; recreating an API with a different secret returned
+  actionable `INVALID_CURSOR`, and fresh searches worked. See the
+  [README workflow evidence](../../README.md#m3-workflow-verification) for commands,
+  process observations, isolation differences and verification limits.
