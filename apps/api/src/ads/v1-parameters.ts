@@ -106,6 +106,7 @@ export function normalizeV1Parameters(
 export function validateV1Parameters(raw: RawParameters): ParameterResult<ValidatedParameters> {
   const value: ValidatedParameters = {};
   if (raw.q !== undefined) {
+    if (raw.q.includes("\0")) return invalid("q", "invalid_text");
     if ([...raw.q.trim()].length > 500) return invalid("q", "too_long");
     value.q = raw.q;
   }

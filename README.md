@@ -218,6 +218,7 @@ remains M4 work.
 `started_after`, `brand_id`, `sort`, `limit` and `cursor`. Unknown names, duplicate
 scalars, invalid/empty enums, noncanonical niches, impossible dates and limits
 outside 1–100 return actionable 422 errors rather than silently broadening search.
+NUL characters in `q` (including URL-encoded `%00`) also return 422 before querying.
 Keyword whitespace is trimmed (case preserved); matching is case-insensitive on
 headline OR body, with literal `%`, `_` and backslash. Repeated niches combine
 with OR, deduplicate and sort; every other filter combines with AND. Dates are
@@ -270,7 +271,7 @@ from one current UTC time, not the first-page clock. Exhaustion does not subscri
 to later changes.
 
 Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-search.test.ts tests/v1-pagination.test.ts`
-passes 27 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
+passes 31 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
 walks, null transitions, tied dates/bytewise IDs, in-flight/later insertion
 exclusion, live deactivation, normalized continuation, replay, UTC rollover,
 fixed expiry, per-request authentication and sanitized no-store errors. Deeper

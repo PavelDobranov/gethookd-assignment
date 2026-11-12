@@ -83,6 +83,17 @@ describe("effective v1 search normalization", () => {
     expect(normalize({ q: "  Serum  %_\\  " }).value?.query.q).toBe("Serum  %_\\");
   });
 
+  it.each(["\0", "ser\0um", "\0serum", "serum\0"])("rejects NUL in q before normalization: %j", (q) => {
+    const expected = {
+      error: {
+        code: "VALIDATION_ERROR",
+        details: [{ parameter: "q", reason: "invalid_text", allowed_values: [], suggestion: null }],
+      },
+    };
+    expect(normalize({ q })).toEqual(expected);
+    expect(normalize({ q, cursor: "opaque" }, original)).toEqual(expected);
+  });
+
   it("normalizes numeric spellings and deduplicates/sorts niches without mutating validation output", () => {
     const validated = validate([
       ["niche", "skincare"],

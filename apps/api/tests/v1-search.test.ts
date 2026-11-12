@@ -154,6 +154,29 @@ it.each([
   expect(seen).toEqual(ids);
 });
 
+it.each(["%00", "ser%00um", "%00serum", "serum%00"])(
+  "rejects q=%s as invalid text on initial and continuation requests",
+  async (q) => {
+    const first = await search("limit=1");
+    for (const suffix of ["", `&${new URLSearchParams({ cursor: first.next_cursor })}`]) {
+      const response = await fetch(`${origin}/api/v1/ads?q=${q}${suffix}`, {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      expect(response.status).toBe(422);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: expect.any(String),
+          next_action: expect.any(String),
+          retryable: false,
+          details: [{ parameter: "q", reason: "invalid_text", allowed_values: [], suggestion: null }],
+        },
+      });
+    }
+  },
+);
+
 it("rejects impressions without a brand with actionable no-store errors", async () => {
   const response = await fetch(`${origin}/api/v1/ads?sort=impressions`, {
     headers: { Authorization: `Bearer ${key}` },
