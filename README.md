@@ -86,10 +86,10 @@ never log keys, raw request URLs or raw database errors.
 
 `npm run test:unit -w @gethookd/api -- tests/logging-config.test.ts` pins the
 server directives/inheritance, API proxy paths/status forwarding and SPA fallback.
-Validate the built Nginx configuration at runtime. Once the v0 endpoint exists,
-Gate C and final workflow acceptance must check application and Nginx logs for
-key-bearing success, rejection and upstream-failure requests using public test
-sentinels only, without dumping raw requests or private secrets into evidence.
+Runtime verification checks the effective built Nginx configuration and scans
+application/Nginx output after v0 success, rejection and upstream failure using
+public test sentinels only. See [M2 workflow verification](#m2-workflow-verification)
+for measured results; do not publish raw key-bearing requests or private secrets.
 
 ```sh
 docker compose down           # Stop/remove containers and network, KEEP DB data
@@ -342,8 +342,8 @@ the brand's maximum without changing existing rows; another seed is a no-op.
 A late-batch uniqueness conflict proves world/brand rollback rather than silent
 conflict-skipping. Rank repair can reach `2147483647`; exhaustion beyond that
 PostgreSQL integer limit fails with full rollback, never wrapping or using null.
-These fixtures simulate ingest; preservation after actual ingest remains a later
-runtime check.
+These fixtures simulate ingest; [M2 workflow verification](#m2-workflow-verification)
+also checks complete-row preservation after running the actual ingest command.
 
 Tests use a separate database inside the disposable PostgreSQL project, covering
 empty/repeated seeding, changed credentials/world rows, missing fixtures, occupied
@@ -723,3 +723,80 @@ stopping with a nonzero exit for a missing workspace/test script, zero collected
 tests, a failed prerequisite, or a failing test.
 `npm run build` builds and type-checks both workspaces; `npm run lint` runs Biome
 lint, and `npm run check` runs Biome checks across `apps/` and `scripts/`.
+
+## M2 workflow verification
+
+Measured on 2026-11-12 against separate fresh source snapshots, without `.env`.
+The local snapshot installed dependencies with `npm ci`; the Docker snapshot had
+no host `node_modules` or `dist` before or after either startup. Each workflow
+used a separately named temporary Compose project and fresh volume, with explicit
+run-ID ownership labels and unused loopback-published ports. The unchanged local
+setup/dev commands ran in a Linux network namespace, with a `socat` Unix-socket
+bridge to that project's PostgreSQL port, avoiding the running developer stack's
+ports. No application source or configuration defaults were changed for the check.
+
+- **Local:** `npm ci` → `npm run setup` → `npm run dev` succeeded. Setup started
+  only PostgreSQL and applied both committed migrations through the shared
+  initializer. Fresh storage contained 300 brands, 20,000 ads, 12,000 active ads,
+  8,000 null ranks and one hashed API key. Through Vite, the documented development
+  key returned HTTP 200 with 20 ads and total 20,000; an invalid key returned the
+  exact generic HTTP 400 error. Login and authenticated identity returned 200;
+  unauthenticated identity returned 401.
+- **Docker-only startup:** `docker compose up --build -d` built API/setup and
+  compiled web assets from the clean snapshot, then brought up PostgreSQL, the
+  one-shot initializer, API and built Nginx web in dependency order. The same fresh
+  counts, v0 success/rejection and login/identity checks passed through Nginx.
+  Only db/API/web stayed running; neither ingest nor Studio started automatically.
+- **Portal:** isolated headless Chromium profiles exercised each workflow's
+  direct `/portal` protection, keyboard login, completed refresh, logout and
+  completed logged-out refresh. Both displayed the server-verified `demo` and
+  Log out control, with no console warnings/errors or runtime exceptions.
+  Screenshots were inspected; no browser E2E tooling was added to the repository.
+- **Actual ingest and preservation:** root `npm run ingest`, with an explicit
+  test-owned `DATABASE_URL`, inserted 5 ads/deactivated 1 seeded ad in the local
+  database, and inserted 4/deactivated 1 in the Docker database. SIGTERM to the
+  actual CLI drained shutdown; each root command exited 0 and left zero ingest
+  database connections. Ingest was stopped before any repeat initialization.
+  Complete ordered row snapshots of `users`, `api_keys`, `brands` and `ads`
+  (including timestamp precision) were byte-for-byte equal before/after local
+  `npm run setup` plus `npm run db:seed`, and Docker `down` → `up --build -d`
+  plus `docker compose run --rm --no-deps setup`. This preserved exact credential
+  hashes, key IDs/hashes/owners, unrelated user/key/brand/ad rows, an explicitly
+  edited headline, actual ingest inserts and deactivated ads. Login/v0 still
+  worked after repeat startup. No random backdating outcome was required or
+  inferred; controlled `ingest.test.ts`/`ingest-db.test.ts` tests prove its
+  probability thresholds and inclusive 1–90-day bounds.
+- **Proxy/log safety:** `docker compose exec -T web nginx -T` confirmed the
+  server's `access_log off` / `error_log /dev/null` without location overrides.
+  Success/rejection produced 200/400; after `docker compose stop api`, the proxy
+  produced 504 rather than SPA HTML. Combined stdout/stderr from API/web/setup
+  contained none of the public key, key-hash, rejection/upstream/query sentinels
+  or `api_key=`. Local setup/dev/seed/ingest output also contained no key-bearing
+  sentinels. The first upstream probe's five-second client timeout was too short;
+  a repeat with a 70-second allowance observed Nginx's response, without changing
+  application, database or test deadlines. Request diagnostics remain deliberately
+  discarded, not recoverable from Nginx logs.
+- **Cleanup:** only generated projects' containers, networks and volumes were
+  removed, after checking Compose-project and run-ID labels. The existing
+  developer stack stayed running and its data was not targeted.
+
+Root regression verification: `npm run build`, `npm run lint`, `npm run check`
+and `npm test` passed: 267 API unit, 261 disposable-PostgreSQL and 65 web tests
+(593 total), including the unchanged v0 contract. No required #51 check remains
+unexecuted; final milestone acceptance/human review is separate (#52).
+
+## Remaining work, in priority order
+
+1. **M2 final acceptance (#52):** review the completed slices and workflow results
+   with the human. `DESIGN.md` and `AI_NOTES.md` remain user-owned; they were not
+   created or modified by this verification.
+2. **M3 — v1 search:** strict discoverable filters, deterministic/null-last sorting,
+   stable cursor promises under ingest, shared UTC `days_active`, structured
+   errors and an OpenAPI regression contract. Preserve v0's intentional quirks.
+3. **M4 — keys and usage:** managed key lifecycle/scopes/revocation, shared
+   60-request/minute limits, exact/idempotent billing and the functional portal.
+   Implement/test the [v0 429 exception](docs/adr/0001-v0-rate-limit-exception.md)
+   here, not in M2; quota enforcement remains a SHOULD requirement.
+4. **M5 — MCP and evaluation:** REST-backed tools consuming shared controls,
+   compact outputs and real-model/client evaluation with the required transcripts.
+   Cross-brand impression comparisons remain unsupported by brand-local ranks.
