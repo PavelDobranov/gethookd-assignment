@@ -236,6 +236,7 @@ it("seeds the complete world and a hash-only key owned by the existing demo user
     .values({ username: "demo", passwordHash: "existing-hash" });
   const [demo] = await db.select().from(users);
   const batchTimings: number[] = [];
+  const batchParameters: unknown[][] = [];
   const client = await db.$client.connect();
   const originalQuery = client.query;
   const query = vi.spyOn(client, "query").mockImplementation(
@@ -244,6 +245,7 @@ it("seeds the complete world and a hash-only key owned by the existing demo user
         const started = performance.now();
         const result = Reflect.apply(target, receiver, args);
         if (args[0]?.text?.startsWith('insert into "ads"')) {
+          batchParameters.push(args[1]);
           return result.finally(() =>
             batchTimings.push(performance.now() - started),
           );
@@ -259,6 +261,12 @@ it("seeds the complete world and a hash-only key owned by the existing demo user
     query.mockRestore();
   }
   expect(batchTimings).toHaveLength(40);
+  // Keep bulk SQL construction bounded: one JSON payload, not 6,000 bindings.
+  expect(batchParameters).toHaveLength(40);
+  for (const parameters of batchParameters) {
+    expect(parameters).toHaveLength(1);
+    expect(JSON.parse(String(parameters[0]))).toHaveLength(500);
+  }
   console.info(
     `[seed] 40 batches of 500 ads: total SQL ${batchTimings.reduce((sum, ms) => sum + ms, 0).toFixed(0)}ms, slowest ${Math.max(...batchTimings).toFixed(0)}ms`,
   );
@@ -312,6 +320,22 @@ it("preserves changed world rows and keys while restoring missing fixture IDs on
   ]);
   expect(await db.select().from(apiKeys)).toEqual(keysBefore);
   expect((await db.select().from(ads)).length).toBe(20_000);
+});
+
+it("round-trips a partial batch with quoted Unicode text, arrays, nulls and offset timestamps", async () => {
+  const fixtures = generateFixtures();
+  const batch = {
+    brands: fixtures.brands.slice(0, 3),
+    ads: fixtures.ads.slice(0, 3).map((ad, index) => ({
+      ...ad,
+      headline: `猫 'quoted' "double" \\ path ${index}`,
+      bodyText: "Line one\nLine two\t%_",
+      countries: index === 0 ? [] : ["US", "GB", "JP"],
+      discoveredAt: new Date("2026-10-05T01:23:45.678+05:30"),
+    })),
+  };
+  await db.transaction((tx) => seedWorld(tx, batch));
+  expect(await db.select().from(ads).orderBy(ads.id)).toEqual(batch.ads);
 });
 
 it("repairs an occupied missing-fixture rank above both existing and full-fixture maxima", async () => {

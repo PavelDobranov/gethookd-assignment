@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { isCountryCode } from "../ads/index.js";
 import type { createDatabase } from "./client.js";
 import type { generateFixtures } from "./fixtures.js";
@@ -73,6 +74,19 @@ export async function seedWorld(
     return { ...ad, impressionRank: rank };
   });
   for (let offset = 0; offset < repaired.length; offset += batchSize) {
-    await tx.insert(ads).values(repaired.slice(offset, offset + batchSize));
+    // One bound payload avoids rebuilding thousands of ORM parameters per batch.
+    // jsonb_to_recordset preserves typed dates, arrays and nulls; constraints still apply.
+    await tx.execute(sql`insert into "ads" (
+      id, brand_id, headline, body_text, niche, format, status, start_date,
+      end_date, impression_rank, countries, discovered_at
+    ) select
+      id, "brandId", headline, "bodyText", niche, format, status, "startDate",
+      "endDate", "impressionRank", countries, "discoveredAt"
+    from jsonb_to_recordset(${JSON.stringify(repaired.slice(offset, offset + batchSize))}::jsonb)
+    as fixture(
+      id text, "brandId" integer, headline text, "bodyText" text, niche text,
+      format text, status text, "startDate" date, "endDate" date,
+      "impressionRank" integer, countries text[], "discoveredAt" timestamptz
+    )`);
   }
 }

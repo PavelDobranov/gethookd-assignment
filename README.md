@@ -352,6 +352,10 @@ key-insert failure proves full transaction rollback and sanitized nonzero comman
 exit. Unmigrated-database and invalid-configuration checks also require prompt
 nonzero exits without exposing sensitive details. Tests report actual timings for
 the 40 batches of 500 ads; two-second query/statement limits stay in force.
+Each batch binds one JSON payload and uses PostgreSQL's
+[`jsonb_to_recordset`](https://www.postgresql.org/docs/17/functions-json.html)
+to expand typed ad rows. This avoids thousands of ORM bindings per batch while
+retaining country validation, database constraints and transaction-wide rollback.
 
 ## Deterministic ad-domain fixtures
 
