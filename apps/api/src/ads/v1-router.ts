@@ -5,6 +5,7 @@ import type { createDatabase } from "../db/client.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
 import { niches } from "./model.js";
 import { handleV1Errors, sendV1Error } from "./v1-errors.js";
+import { getV1Ad } from "./v1-resources.js";
 
 function createAuthenticateHandler(db: ReturnType<typeof createDatabase>["db"]): RequestHandler {
   return async function authenticate(req, res, next) {
@@ -49,6 +50,29 @@ const handleGetNiches: RequestHandler = (req, res, next) => {
   res.json({ data: niches.map(({ slug, name }) => ({ slug, name })) });
 };
 
+function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): RequestHandler<{ id: string }> {
+  return async function handleGetAd(req, res, next) {
+    if (req.method !== "GET") {
+      next();
+      return;
+    }
+    const queryStart = req.originalUrl.indexOf("?");
+    const parameters = new URLSearchParams(queryStart === -1 ? "" : req.originalUrl.slice(queryStart + 1));
+    if (parameters.size > 0) {
+      sendV1Error(res, "VALIDATION_ERROR", [
+        { parameter: "query", reason: "unknown_parameter", allowed_values: [], suggestion: null },
+      ]);
+      return;
+    }
+    const ad = await getV1Ad(db, req.params.id);
+    if (!ad) {
+      sendV1Error(res, "AD_NOT_FOUND");
+      return;
+    }
+    res.json({ data: ad });
+  };
+}
+
 const handleNotFound: RequestHandler = (_req, res) => {
   sendV1Error(res, "NOT_FOUND");
 };
@@ -60,6 +84,7 @@ export function createV1Router({ db }: { db: ReturnType<typeof createDatabase>["
   router.use(createAuthenticateHandler(db));
   router.use(validatePath);
   router.get("/niches", handleGetNiches);
+  router.get("/ads/:id", createGetAdHandler(db));
   router.use(handleNotFound);
   router.use(handleV1Errors);
 

@@ -9,7 +9,7 @@ import { hashApiKey } from "../src/api-keys/index.js";
 import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
-import { apiKeys, users } from "../src/db/schema.js";
+import { ads, apiKeys, brands, users } from "../src/db/schema.js";
 
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v1_resources_test";
@@ -65,6 +65,67 @@ async function expectError(response: Response, status: number, code: string) {
   expect(body.error.next_action.length).toBeGreaterThan(0);
   return body.error;
 }
+
+const detailId = "v1-detail-active";
+const detailBrand = 90001;
+
+it("returns the full active detail allowlist from current joined data", async () => {
+  await connection.db.insert(brands).values({ id: detailBrand, name: "Detail Brand" });
+  await connection.db.insert(ads).values({
+    id: detailId,
+    brandId: detailBrand,
+    headline: "Detail headline",
+    bodyText: "Full untruncated body",
+    niche: "pet-supplies",
+    format: "carousel",
+    status: "active",
+    startDate: "2026-01-01",
+    endDate: null,
+    impressionRank: null,
+    countries: ["US", "GB"],
+    discoveredAt: new Date("2026-01-02T03:04:05.123Z"),
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-01-03T23:59:59.999Z"));
+  try {
+    const response = await request(`/ads/${detailId}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      data: {
+        id: detailId,
+        brand_id: detailBrand,
+        brand_name: "Detail Brand",
+        headline: "Detail headline",
+        body_text: "Full untruncated body",
+        niche: "pet-supplies",
+        format: "carousel",
+        status: "active",
+        start_date: "2026-01-01",
+        end_date: null,
+        days_active: 2,
+        impression_rank: null,
+        countries: ["US", "GB"],
+        discovered_at: "2026-01-02T03:04:05.123Z",
+      },
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("returns actionable AD_NOT_FOUND for a well-formed absent ID", async () => {
+  const error = await expectError(await request("/ads/absent-opaque-id"), 404, "AD_NOT_FOUND");
+  expect(error.details).toEqual([]);
+  expect(error.next_action).toMatch(/ID|search/);
+});
+
+it.each(["?q=serum", "?status=active", "?cursor=sentinel", "?api_key=sentinel", "?x=1&x=2"])(
+  "rejects detail query parameters before looking up even a missing ID: %s",
+  async (query) => {
+    await expectError(await request(`/ads/absent-opaque-id${query}`), 422, "VALIDATION_ERROR");
+  },
+);
 
 it("returns exactly the existing ordered slug/name catalog and accepts the same key as v0", async () => {
   const response = await request();

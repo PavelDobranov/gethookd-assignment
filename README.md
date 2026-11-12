@@ -201,14 +201,34 @@ Errors have exactly these fields (wording may vary):
 ```
 
 Current codes are `UNAUTHENTICATED` (401), `NOT_FOUND` (404, unknown route or
-method), `VALIDATION_ERROR` (422, unsupported niche query parameters or malformed
+method), `AD_NOT_FOUND` (404, missing ad), `VALIDATION_ERROR` (422, unsupported resource query parameters or malformed
 path encoding), and `INTERNAL_ERROR` (500, including database failure). Only 500
 is retryable, after a short delay. Validation details contain `parameter`,
 `reason`, `allowed_values` and nullable `suggestion`; this endpoint accepts no
 query parameters, so its allowed-values list is empty. Unsupported HEAD returns
 404 headers without a body, as required by HTTP. v0 and portal errors are unchanged.
-Search, ad detail, cursor HTTP errors and OpenAPI coverage remain later M3 slices;
+Search, cursor HTTP errors and OpenAPI coverage remain later M3 slices;
 rate limiting remains M4 work.
+
+### v1 ad detail
+
+`GET /api/v1/ads/:id` reads the current ad joined with its brand, independently of
+search cursors. Encode the exact opaque string ID as one URL path segment; IDs
+are not numbers and are not trimmed or normalized. No query parameters are accepted.
+
+```sh
+curl -i 'http://localhost:3000/api/v1/ads/ad-example' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+```
+
+The response is `{ "data": { ... } }` with exactly `id` (string), `brand_id`
+(integer), `brand_name`, `headline`, `niche` (slug), `format`, `status`,
+`start_date`, `days_active`, `impression_rank` (integer or null), `body_text`,
+`end_date` (date or null), `countries` (ISO-2 array), and `discovered_at` (UTC ISO
+timestamp). Dates use `YYYY-MM-DD`. Active days use the response's current UTC
+date; inactive days use the end date. Missing IDs return `AD_NOT_FOUND` with
+instructions to check the ID from search. Authentication, no-store, query
+rejection and sanitized server-error behavior match niche discovery.
 
 Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-resources.test.ts tests/v0.test.ts`
 checks real HTTP/PostgreSQL authentication, exact catalog/response allowlists,

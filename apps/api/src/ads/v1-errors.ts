@@ -13,6 +13,11 @@ const errors = {
     message: "A valid Bearer API key is required.",
     next_action: "Provide a stored API key in Authorization: Bearer <key>.",
   },
+  AD_NOT_FOUND: {
+    status: 404,
+    message: "The requested ad was not found.",
+    next_action: "Check the exact ad ID from search results.",
+  },
   NOT_FOUND: {
     status: 404,
     message: "The requested v1 route or method was not found.",
