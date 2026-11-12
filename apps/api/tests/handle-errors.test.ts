@@ -82,6 +82,10 @@ it.each([
 it.each([
   ["client query_timeout", new Error("Query read timeout")],
   [
+    "client connectionTimeoutMillis",
+    new Error("Connection terminated due to connection timeout"),
+  ],
+  [
     "server statement_timeout",
     Object.assign(new Error("private-query"), { code: "57014" }),
   ],
@@ -113,6 +117,18 @@ it.each([
   new Error("private-password private-token"),
   queryFailure(new Error("Connection terminated unexpectedly")),
   new Error("Query read timeout"),
+  new Error("Connection terminated due to connection timeout"),
+  queryFailure(
+    new Error("private-sql Connection terminated due to connection timeout"),
+  ),
+  queryFailure(
+    Object.assign(
+      new Error("Connection terminated due to connection timeout"),
+      {
+        code: "42P01",
+      },
+    ),
+  ),
   queryFailure(new Error("private-sql Query read timeout")),
   queryFailure(
     Object.assign(new Error("Query read timeout"), { code: "42P01" }),

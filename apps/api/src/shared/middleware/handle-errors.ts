@@ -71,9 +71,14 @@ function isDatabaseUnavailable(error: unknown): boolean {
 function isDatabaseUnavailableCause(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
 
-  // pg's client-side query_timeout emits this exact error without a code.
-  // It can win the race with PostgreSQL's statement_timeout (57014).
-  if (!("code" in error)) return error.message === "Query read timeout";
+  // pg's client-side query and connection deadlines emit exact code-less errors.
+  // The query deadline can race PostgreSQL's statement_timeout (57014).
+  if (!("code" in error)) {
+    return (
+      error.message === "Query read timeout" ||
+      error.message === "Connection terminated due to connection timeout"
+    );
+  }
 
   const { code } = error;
 

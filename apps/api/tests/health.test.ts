@@ -76,29 +76,48 @@ it("returns a generic 503 for an actual refused database connection", async () =
   await unavailable(await fetch(`${await listen(refused.db)}/api/health`));
 });
 
-it("bounds connection waits when a TCP peer never completes PostgreSQL startup", async () => {
-  const sockets = new Set<Socket>();
-  const peer = createServer((socket) => {
-    sockets.add(socket);
-    socket.on("close", () => sockets.delete(socket));
-  }).listen(0, "127.0.0.1");
-  await once(peer, "listening");
-  const address = peer.address();
-  if (!address || typeof address === "string")
-    throw new Error("Expected TCP peer");
-  const stalled = createDatabase(
-    `postgresql://private:private@127.0.0.1:${address.port}/private`,
-  );
-  extras.push(stalled);
-  try {
-    const start = performance.now();
-    await unavailable(await fetch(`${await listen(stalled.db)}/api/health`));
-    expect(performance.now() - start).toBeLessThan(4000);
-  } finally {
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve) => peer.close(() => resolve()));
-  }
-});
+it.each(["health", "login", "identity"])(
+  "bounds %s connection waits when a TCP peer never completes PostgreSQL startup",
+  async (route) => {
+    const sockets = new Set<Socket>();
+    const peer = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+    }).listen(0, "127.0.0.1");
+    await once(peer, "listening");
+    const address = peer.address();
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP peer");
+    const stalled = createDatabase(
+      `postgresql://private:private@127.0.0.1:${address.port}/private`,
+    );
+    try {
+      const stalledOrigin = await listen(stalled.db);
+      const path =
+        route === "health"
+          ? "/api/health"
+          : `/api/auth/${route === "login" ? "login" : "me"}`;
+      const options =
+        route === "login"
+          ? {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                username: "demo",
+                password: "demo-password",
+              }),
+            }
+          : { headers: { authorization: `Bearer ${token}` } };
+      const start = performance.now();
+      await unavailable(await fetch(`${stalledOrigin}${path}`, options));
+      expect(performance.now() - start).toBeLessThan(4000);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await stalled.close();
+      await new Promise<void>((resolve) => peer.close(() => resolve()));
+    }
+  },
+);
 
 it("bounds protected query waits with real PostgreSQL locks and recovers after release", async () => {
   const locker = new pg.Client({
