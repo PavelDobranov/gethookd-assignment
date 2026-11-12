@@ -459,6 +459,12 @@ cannot substitute. Responses are not cached. All v0 failures, including database
 failures, return exactly HTTP 400 `{"error":"Invalid request"}` locally, without
 changing portal/health errors or logging raw errors, keys or request URLs.
 
+The accepted [v0 rate-limit exception ADR](docs/adr/0001-v0-rate-limit-exception.md)
+records an **M4-only** compatibility exception: rate-limit failures will return
+HTTP 429 with accurate `Retry-After`. M2's generic 400 behavior and contract tests
+remain unchanged; exception implementation, rate-limit tests and the regression
+contract update belong to M4.
+
 Success is `{"data":[...],"page":1,"total":123}`. Each ad contains only string
 `id`, brand name `brand`, `headline`, niche display name `niche`, `format`,
 `status`, `start_date` (`YYYY-MM-DD`) and integer `days_active`. Days use the
