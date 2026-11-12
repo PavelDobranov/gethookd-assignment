@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { eq, sql } from "drizzle-orm";
+import { readMigrationFiles } from "drizzle-orm/migrator";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
 import { hashPassword, verifyPassword } from "../src/auth/password.js";
@@ -64,10 +65,17 @@ it("initializes an empty database then preserves changed credentials and unrelat
     expect(
       (
         await connection.db.execute(
-          sql`SELECT * FROM drizzle.__drizzle_migrations`,
+          sql`SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id`,
         )
       ).rows,
-    ).toHaveLength(1);
+    ).toEqual(
+      readMigrationFiles({ migrationsFolder: "drizzle" }).map(
+        ({ hash, folderMillis }) => ({
+          hash,
+          created_at: String(folderMillis),
+        }),
+      ),
+    );
   } finally {
     await connection.close();
   }

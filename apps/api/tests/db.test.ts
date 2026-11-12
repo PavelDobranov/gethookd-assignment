@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { eq, sql } from "drizzle-orm";
+import { readMigrationFiles } from "drizzle-orm/migrator";
 import { afterAll, beforeAll, expect, inject, it } from "vitest";
 import { createDatabase } from "../src/db/client.js";
 import { users } from "../src/db/schema.js";
@@ -123,7 +124,13 @@ it("reapplying committed migrations preserves both users and the migration ledge
   const ledger = await db.execute(
     sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`,
   );
-  expect(ledger.rows).toHaveLength(1);
+  expect(
+    ledger.rows.map(({ hash, created_at }) => ({ hash, created_at })),
+  ).toEqual(
+    readMigrationFiles({ migrationsFolder: "drizzle" }).map(
+      ({ hash, folderMillis }) => ({ hash, created_at: String(folderMillis) }),
+    ),
+  );
   await migrate();
   expect(await db.select().from(users)).toEqual(before);
   expect(
