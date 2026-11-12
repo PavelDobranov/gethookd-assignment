@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
 
 import { hashApiKey } from "../src/api-keys/index.js";
@@ -8,6 +8,7 @@ import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import { runIngestTick } from "../src/ingest/tick.js";
 
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v1_pagination_test";
@@ -116,6 +117,110 @@ async function expectError(response: Response, status: number, code: string) {
   });
   return body;
 }
+
+// Two real inserts per tick: current/known rank and backdated/null rank.
+// Random draws select exact old ads, never relying on UUID order or process waits.
+async function ingest(deactivate: string[], beforeCommit?: () => Promise<void>) {
+  const time = new Date("2026-01-01T00:00:00Z");
+  const candidates = await writer.db
+    .select({ id: ads.id })
+    .from(ads)
+    .where(and(eq(ads.status, "active"), lte(ads.startDate, "2026-01-01")))
+    .orderBy(ads.id);
+  const availableBrands = await writer.db.select({ id: brands.id }).from(brands).orderBy(brands.id);
+  const brandDraw = (availableBrands.findIndex((brand) => brand.id === brandId) + 0.5) / availableBrands.length;
+  const draws = [0.25, deactivate.length === 2 ? 0.5 : 0];
+  for (const id of deactivate) {
+    const index = candidates.findIndex((candidate) => candidate.id === id);
+    expect(index).toBeGreaterThanOrEqual(0);
+    draws.push((index + 0.5) / candidates.length);
+    candidates.splice(index, 1);
+  }
+  draws.push(brandDraw, 0, 0, 0.3, 0.4, brandDraw, 0, 0, 0.1, 0, 0);
+  const transaction = writer.db.transaction.bind(writer.db);
+  const barrier = beforeCommit
+    ? vi.spyOn(writer.db, "transaction").mockImplementationOnce((read, config) =>
+        transaction(async (tx) => {
+          const result = await read(tx);
+          // All real tick writes are complete but uncommitted here.
+          await beforeCommit();
+          return result;
+        }, config),
+      )
+    : undefined;
+  try {
+    await runIngestTick(writer.db, {
+      clock: () => time,
+      random: () => {
+        const draw = draws.shift();
+        if (draw === undefined) throw new Error("Unexpected ingest random draw");
+        return draw;
+      },
+    });
+    expect(draws).toEqual([]);
+  } finally {
+    barrier?.mockRestore();
+  }
+}
+
+it.each(["newest", "impressions"].flatMap((sort) => ["", "active", "inactive"].map((status) => ({ sort, status }))))(
+  "fully walks $sort/$status during controlled real ingest commits",
+  async ({ sort, status }) => {
+    await connection.db
+      .insert(ads)
+      .values([
+        { ...ad("B", 2), status: "inactive", endDate: "2026-01-01" },
+        ad("Y", 3),
+        { ...ad("b"), status: "inactive", endDate: "2026-01-01" },
+        ad("c"),
+        ad("y"),
+      ]);
+    const query = `brand_id=${brandId}&sort=${sort}${status ? `&status=${status}` : ""}`;
+    let initial: string[] = [];
+    let first: Awaited<ReturnType<typeof page>> | undefined;
+    await ingest(["Z"], async () => {
+      // Advance xmax beyond the open tick: a simple max-xid fence would fail.
+      await connection.db.insert(ads).values(ad("boundary", 8));
+      initial = (await page(query)).data.map((row: { id: string }) => row.id);
+      first = await page(`${query}&limit=1`);
+      expect(first.data.map((row: { id: string }) => row.id)).toEqual([initial[0]]);
+    });
+    if (!first) throw new Error("First-page synchronization did not execute");
+    await ingest(["c"]);
+    const seen: string[] = first.data.map((row: { id: string }) => row.id);
+    let cursor = first.next_cursor;
+    let index = 0;
+    while (cursor) {
+      // Deactivate a post-B insert too; inactive/unfiltered walks must still exclude it.
+      const inserted = await writer.db.select().from(ads).where(eq(ads.status, "active")).orderBy(ads.id);
+      const target = inserted.find((row) => row.id.startsWith("ingest-ad-"));
+      if (!target) throw new Error("Expected active tick insert");
+      await ingest([target.id]);
+      const next = await page(continuation(cursor, { limit: String(1 + (index++ % 2)), brand_id: `0${brandId}` }));
+      expect(next.applied_filters).toEqual(first.applied_filters);
+      expect(next.cursor_expires_at).toBe(first.cursor_expires_at);
+      expect(next.sort).toBe(sort);
+      expect(next.data.length).toBeGreaterThan(0);
+      seen.push(...next.data.map((row: { id: string }) => row.id));
+      expect(new Set(seen).size).toBe(seen.length);
+      expect(index).toBeLessThan(12);
+      cursor = next.next_cursor;
+    }
+    const continuouslyEligible = initial.filter((id) => status !== "active" || !["Z", "c"].includes(id));
+    // Newly inactive rows may appear ahead, but are not part of the completeness promise.
+    const guaranteed = status === "inactive" ? seen.filter((id) => !["Z", "c"].includes(id)) : seen;
+    expect(guaranteed).toEqual(continuouslyEligible);
+    expect(seen.some((id) => id.startsWith("ingest-ad-"))).toBe(false);
+    const fresh = await page(query);
+    expect(fresh.data.some((row: { id: string }) => row.id.startsWith("ingest-ad-"))).toBe(true);
+    const stored = await writer.db.select().from(ads);
+    const postBoundary = stored.filter((row) => row.id.startsWith("ingest-ad-"));
+    expect(postBoundary.some((row) => row.startDate === "2025-12-31")).toBe(true);
+    expect(postBoundary.some((row) => row.startDate === "2026-01-01")).toBe(true);
+    expect(postBoundary.every((row) => row.discoveredAt.toISOString() === "2026-01-01T00:00:00.000Z")).toBe(true);
+    expect(postBoundary.some((row) => row.status === "inactive")).toBe(true);
+  },
+);
 
 it.each([false, true])("walks adversarial brand-local ranks and bytewise null IDs (all-null=%s)", async (allNull) => {
   await connection.db.delete(ads);
