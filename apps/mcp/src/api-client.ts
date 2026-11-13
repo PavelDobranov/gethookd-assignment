@@ -1,7 +1,28 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { z } from "zod";
 
 const nichesSchema = z.looseObject({
   data: z.array(z.looseObject({ slug: z.string(), name: z.string() })),
+});
+
+const adDetailSchema = z.looseObject({
+  data: z.looseObject({
+    id: z.string().min(1),
+    brand_id: z.number().int().min(1).max(2_147_483_647),
+    brand_name: z.string(),
+    headline: z.string(),
+    niche: z.string(),
+    format: z.enum(["image", "video", "carousel"]),
+    status: z.enum(["active", "inactive"]),
+    start_date: z.iso.date(),
+    days_active: z.number().int(),
+    impression_rank: z.number().int().positive().nullable(),
+    body_text: z.string(),
+    end_date: z.iso.date().nullable(),
+    countries: z.array(z.string().regex(/^[A-Z]{2}$/)),
+    discovered_at: z.iso.datetime(),
+  }),
 });
 
 const errorSchema = z.looseObject({
@@ -21,17 +42,16 @@ const errorSchema = z.looseObject({
   }),
 });
 
-type ApiResult =
-  | { isError: false; body: z.infer<typeof nichesSchema> }
-  | { isError: true; body: z.infer<typeof errorSchema> };
+type ApiResult<T> = { isError: false; body: T } | { isError: true; body: z.infer<typeof errorSchema> };
 
 /** HTTP-only boundary. No API implementation imports, credentials, retries or redirects. */
 export type ApiClient = {
   readonly baseUrl: string;
-  listNiches(): Promise<ApiResult>;
+  listNiches(): Promise<ApiResult<z.infer<typeof nichesSchema>>>;
+  getAd(input: { id: string; idempotency_key?: string }): Promise<ApiResult<z.infer<typeof adDetailSchema>>>;
 };
 
-function operationalError(code: string, message: string): ApiResult {
+function operationalError(code: string, message: string): ApiResult<never> {
   return {
     isError: true,
     body: {
@@ -67,37 +87,66 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
     throw new Error("API timeout must be an integer between 1 and 30000 milliseconds.");
   }
-  const url = new URL("/api/v1/niches", origin);
+  const transport = origin.protocol === "https:" ? httpsRequest : httpRequest;
+
+  async function get<T>(path: string, schema: z.ZodType<T>, idempotencyKey?: string): Promise<ApiResult<T>> {
+    const signal = AbortSignal.timeout(timeoutMs);
+    let response: { status: number; text: string };
+    try {
+      response = await new Promise((resolve, reject) => {
+        // Keep path separate from the URL: even percent-encoded dot segments
+        // are normalized by WHATWG URL/fetch. Node HTTP preserves this path.
+        const request = transport(
+          origin,
+          {
+            method: "GET",
+            path,
+            signal,
+            headers: idempotencyKey === undefined ? {} : { "Idempotency-Key": idempotencyKey },
+          },
+          (incoming) => {
+            const chunks: Buffer[] = [];
+            incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+            incoming.once("error", reject);
+            incoming.once("end", () => {
+              resolve({ status: incoming.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") });
+            });
+          },
+        );
+        // The abort signal bounds the entire exchange, including the body.
+        // Node HTTP neither follows redirects nor automatically retries.
+        request.once("error", reject);
+        request.end();
+      });
+    } catch {
+      return signal.aborted
+        ? operationalError("API_TIMEOUT", "The API request exceeded its deadline.")
+        : operationalError("API_UNAVAILABLE", "The API request could not be completed.");
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse(response.text);
+    } catch {
+      return operationalError("API_INVALID_RESPONSE", "The API returned invalid JSON.");
+    }
+    // Validate without projecting parsed output: preserve all valid JSON fields.
+    const ok = response.status >= 200 && response.status < 300;
+    if (ok && schema.safeParse(body).success) {
+      return { isError: false, body: body as T };
+    }
+    if (!ok && errorSchema.safeParse(body).success) {
+      return { isError: true, body: body as z.infer<typeof errorSchema> };
+    }
+    return operationalError("API_INVALID_RESPONSE", "The API returned an invalid response shape.");
+  }
 
   return {
     baseUrl: origin.origin,
-    async listNiches() {
-      const signal = AbortSignal.timeout(timeoutMs);
-      let response: Response;
-      let body: unknown;
-      try {
-        response = await fetch(url, { method: "GET", redirect: "error", signal });
-        // Keep the deadline active through body delivery, not just response headers.
-        const text = await response.text();
-        try {
-          body = JSON.parse(text);
-        } catch {
-          return operationalError("API_INVALID_RESPONSE", "The API returned invalid JSON.");
-        }
-      } catch {
-        return signal.aborted
-          ? operationalError("API_TIMEOUT", "The API request exceeded its deadline.")
-          : operationalError("API_UNAVAILABLE", "The API request could not be completed.");
-      }
-
-      // Validate without projecting parsed output: preserve all valid JSON fields.
-      if (response.ok && nichesSchema.safeParse(body).success) {
-        return { isError: false, body: body as z.infer<typeof nichesSchema> };
-      }
-      if (!response.ok && errorSchema.safeParse(body).success) {
-        return { isError: true, body: body as z.infer<typeof errorSchema> };
-      }
-      return operationalError("API_INVALID_RESPONSE", "The API returned an invalid response shape.");
+    listNiches: () => get("/api/v1/niches", nichesSchema),
+    getAd({ id, idempotency_key }) {
+      const segment = id === "." || id === ".." ? id.replaceAll(".", "%2E") : encodeURIComponent(id);
+      return get(`/api/v1/ads/${segment}`, adDetailSchema, idempotency_key);
     },
   };
 }

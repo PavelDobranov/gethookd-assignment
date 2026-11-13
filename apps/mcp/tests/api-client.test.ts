@@ -144,6 +144,39 @@ describe("API HTTP boundary", () => {
     );
   });
 
+  it.each([
+    [".", "/api/v1/ads/%2E"],
+    ["..", "/api/v1/ads/%2E%2E"],
+    ["a/../b", "/api/v1/ads/a%2F..%2Fb"],
+  ])("preserves raw detail path segments for %s", async (id, path) => {
+    const requests: string[] = [];
+    const body = {
+      data: {
+        id,
+        brand_id: 1,
+        brand_name: "Brand",
+        headline: "Complete headline",
+        niche: "skincare",
+        format: "video",
+        status: "active",
+        start_date: "2025-01-01",
+        days_active: 10,
+        impression_rank: null,
+        body_text: "Complete copy",
+        end_date: null,
+        countries: ["US"],
+        discovered_at: "2025-01-02T00:00:00.000Z",
+      },
+    };
+    const baseUrl = await fixture((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      res.end(JSON.stringify(body));
+    });
+
+    expect(await createApiClient({ baseUrl }).getAd({ id })).toEqual({ isError: false, body });
+    expect(requests).toEqual([`GET ${path}`]);
+  });
+
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 30_001])("rejects invalid timeout %s", (timeoutMs) => {
     expect(() => createApiClient({ baseUrl: "http://localhost:3000", timeoutMs })).toThrow("API timeout");
   });
