@@ -447,27 +447,37 @@ recreate API containers (`docker compose up -d --force-recreate api`) to apply t
 new value. Do not rotate `JWT_SECRET` as a substitute. No in-memory key registry or
 rotation UI is involved.
 
-The internal codec (`apps/api/src/ads/v1/cursor.ts`) uses Node AES-256-GCM with a
-SHA-256-derived, domain-separated key, fresh 12-byte nonces, 16-byte tags and
-authenticated version context. Tokens carry only normalized query/sort, insertion
-snapshot, last position and original issue/expiry times—not credentials or result
-lists. `issue` starts a 30-minute lifetime using the injected clock; continuation
-code must use `encode` on decoded state with an updated position, preserving the
-original times. `decode` authenticates before validating state or reporting expiry.
-Tokens can be replayed; they never authorize a request.
+The internal codec (`apps/api/src/ads/v1/cursor.ts`) is a trust-token (see
+[ADR-0004](docs/adr/0004-v1-cursor-trust-token.md)): `jose` encrypts an
+authenticated `dir`/A256GCM JWE under a SHA-256-derived, domain-separated,
+server-only key, with a versioned audience (`gethookd:ads:cursor:v1`) as the
+format/context guard. Because the token is authenticated encryption under a secret
+only the server holds, decrypted contents are trusted as server-issued: `zod`
+validates only the payload *shape* (and the cheap model enums) so `decode` returns
+a typed `CursorState` with no unsafe casts, while untrusted request input is
+validated where it enters (`apps/api/src/ads/v1/parameters.ts`), not re-validated
+inside the codec. Tokens carry only normalized query/sort, insertion snapshot, last
+position and original issue/expiry times—not credentials or result lists.
+Continuation code calls `encode` on decoded state with an updated position,
+preserving the original millisecond issue/expiry times so `cursor_expires_at` is
+byte-identical across pages. `decode` decrypts and authenticates before shape
+validation or expiry, and enforces the 30-minute lifetime at exact millisecond
+precision from the carried claim (jose's second-granularity `exp` is a rounded-up
+backstop only). Tokens can be replayed; they never authorize a request.
 
-Both input and output are limited to 4096 ASCII base64url characters. Invalid,
-unsupported, tampered or wrong-secret tokens raise sanitized `INVALID_CURSOR`;
-at or after expiry, authenticated valid tokens raise `CURSOR_EXPIRED`. Both require
-an unmodified valid token or a fresh search, not a silent restart. Oversized
-server-generated state fails explicitly rather than truncating the snapshot; this
-bounds supported concurrent snapshot metadata, not the result count. Search maps
-these errors to the v1 HTTP 422 envelope.
+Inbound cursors are limited to 4096 JWE-charset characters. Invalid, unsupported,
+tampered, wrong-secret or wrong-audience tokens raise sanitized `INVALID_CURSOR`;
+at or after expiry, valid tokens raise `CURSOR_EXPIRED`. Both require an unmodified
+valid token or a fresh search, not a silent restart. Search maps these errors to
+the v1 HTTP 422 envelope. Unlike the previous hand-rolled AES-GCM envelope, the
+codec has no producer-side size cap: a pathological insertion snapshot (≈1000
+concurrent in-flight transactions) could in principle encode past 4096 characters
+and would then be rejected inbound by `parameters.ts` rather than at encode time.
+Realistic snapshots are tiny (a few concurrent transactions), so this is accepted.
 
 Focused verification: `npm run test:unit -w @gethookd/api -- tests/v1-cursor.test.ts`
-covers both sorts, null ranks, replay/reconstruction, tampering, authenticated
-payload validation, nonce variation, exact size/expiry boundaries and retained
-original expiry with deterministic clocks.
+covers both sorts, null ranks, replay/reconstruction, tampering, wrong-secret,
+audience and shape rejection, and the exact expiry boundary with deterministic clocks.
 
 ## Disposable PostgreSQL integration tests
 

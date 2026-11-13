@@ -6,6 +6,13 @@ Accepted design in [plan #55](https://github.com/PavelDobranov/gethookd-assignme
 Implemented through #56–#69; feasibility and search review gates #58–#70 are
 closed. Final milestone acceptance remains a separate human review (#73).
 
+The cursor's **token encoding** (the AES-256-GCM envelope and field-by-field payload
+re-validation described in the consequences below) was superseded by
+[ADR-0004](0004-v1-cursor-trust-token.md) (#75): a `jose` JWE + shape-level `zod`
+trust-token. The correctness design recorded here — `inserted_xid`,
+`pg_current_snapshot()`, `pg_visible_in_snapshot`, keyset position, exact expiry and
+the `INVALID_CURSOR`/`CURSOR_EXPIRED` contract — is unchanged.
+
 ## Date
 
 2026-11-12

@@ -113,7 +113,7 @@ paths:
             unsupported or secret-invalidated tokens return INVALID_CURSOR; at or
             after fixed expiry return CURSOR_EXPIRED. Start fresh rather than retry
             the same expired token. Syntax alone does not prove integrity or validity.
-          schema: { type: string, minLength: 1, maxLength: 4096, pattern: '^[A-Za-z0-9_-]+$' }
+          schema: { type: string, minLength: 1, maxLength: 4096, pattern: '^[A-Za-z0-9_.-]+$' }
       responses:
         '200':
           description: Matching summaries; empty/final pages have next_cursor null, including the final nonempty page.
@@ -294,7 +294,7 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 4096
-          pattern: '^[A-Za-z0-9_-]+$'
+          pattern: '^[A-Za-z0-9_.-]+$'
         cursor_expires_at:
           $ref: '#/components/schemas/UtcTimestamp'
           description: Fixed first-page expiry even on final/empty pages; never renewed.

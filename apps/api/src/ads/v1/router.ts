@@ -105,7 +105,7 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
     }
     let original: CursorState | undefined;
     try {
-      original = validated.value.cursor === undefined ? undefined : codec.decode(validated.value.cursor);
+      original = validated.value.cursor === undefined ? undefined : await codec.decode(validated.value.cursor);
     } catch (error) {
       if (!(error instanceof CursorError)) throw error;
       sendError(res, error.code);
@@ -126,7 +126,7 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
     const expiresAt = original?.expiresAt ?? issuedAt + 30 * 60 * 1000;
     const nextCursor =
       page.data.length > limit && last
-        ? codec.encode({
+        ? await codec.encode({
             query,
             snapshot: page.snapshot,
             issuedAt,

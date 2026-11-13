@@ -158,7 +158,7 @@ export function validateParameters(raw: RawParameters): ParameterResult<Validate
     value[name] = supplied;
   }
   if (raw.cursor !== undefined) {
-    if (raw.cursor.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(raw.cursor)) {
+    if (raw.cursor.length > 4096 || !/^[A-Za-z0-9_.-]+$/.test(raw.cursor)) {
       return { error: { code: "INVALID_CURSOR", details: [] } };
     }
     value.cursor = raw.cursor;
