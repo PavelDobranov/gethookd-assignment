@@ -4,9 +4,10 @@ MCP server for GetHookd. It exposes GetHookd ad search to MCP clients (AI agents
 over **Streamable HTTP**, calling the REST API (`apps/api`) over HTTP — never
 the database directly.
 
-This is an **intermediate M5 implementation**: all three tools are HTTP-backed.
-Caller credential forwarding is not connected yet, so the protected real API rejects tool calls
-with its unchanged authentication error. No shared key or API bypass is provided.
+All three tools are HTTP-backed, and each tool invocation forwards the caller's
+own `Authorization: Bearer <key>` to the corresponding REST request. No shared key
+or API bypass is provided; REST remains the sole authority for key validity,
+scopes, revocation, rate limits and billing.
 
 ## Running
 
@@ -117,9 +118,17 @@ a fresh search without a cursor to clear filters.
 - Integration tests drive the real MCP protocol with the official client and
   a controlled HTTP API fixture; discovery does not make API requests.
 
+**Authentication:** each caller sends `Authorization: Bearer <API key>` on the MCP
+request. The server reads Node's raw headers before SDK normalization and accepts
+exactly one well-formed Bearer header, forwarding it unchanged to REST per
+invocation. A missing, malformed or duplicate header is answered locally with
+`UNAUTHENTICATED` guidance and reaches no REST call; an unverified key is never
+presented to the SDK as validated auth. Credentials are request-scoped, never
+stored, cached, logged, placed in tool arguments or carried in URLs, and
+concurrent callers stay isolated.
+
 **Remaining for M5:**
 
-- Forward the caller's API key as a Bearer credential to the REST API.
 - Model evaluation evidence (`MCP_EVAL.md`).
 
 Authentication, authorization, scopes, rate limiting, metering and billing stay
