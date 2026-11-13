@@ -98,8 +98,6 @@ docker compose up --build    # rebuilds and starts services again
 
 Avoid `docker compose down -v` unless you intend to delete the stored database data.
 
-> The Docker configuration is for local evaluation, **not a hardened production deployment**. Never expose the public demo credentials or default secrets.
-
 ## Try It
 
 1. **Developer Portal:** Sign in and inspect Overview, create an API key with `search:read` on the API keys view, copy its secret (shown only once), and inspect Usage. Keys can be permanently revoked.
