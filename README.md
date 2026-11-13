@@ -620,8 +620,38 @@ are rejected; list limit/offset accept decimal digits only (limit 1–100, offse
 a nonnegative safe integer). Invalid UUIDs yield 422; foreign/missing IDs share
 404 `KEY_NOT_FOUND`. Authentication is checked against a live user before parsing.
 There is no automatic POST retry or secret recovery: after a lost response, list
-and revoke the orphan, then explicitly create a replacement. Usage routes and
-the browser management UI are later slices, not exposed here.
+and revoke the orphan, then explicitly create a replacement. The browser
+management UI remains a later slice.
+
+### Scoped API management and owner usage
+
+`POST/GET /api/v1/keys`, `DELETE /api/v1/keys/:id`, and `GET /api/v1/usage`
+require a stored Bearer API key with `keys:manage`. They use the same management
+contracts as the portal above; issuance can grant only a subset of the caller's
+scopes. `search:read` alone cannot manage keys or read usage; `keys:manage` alone
+cannot search/discover or issue a search-capable key. A both-scopes key can do both.
+Self-revocation returns 204; the next call fails authentication. All operations
+are free at quota exhaustion, but API-key calls still consume the shared rolling
+allowance exactly once. `Idempotency-Key` is ignored, including malformed values;
+it **does not make POST creation retry-safe**.
+
+```sh
+curl http://localhost:3000/api/v1/usage -H "Authorization: Bearer $API_KEY"
+curl -X POST http://localhost:3000/api/v1/keys \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"scopes":["keys:manage"]}'
+curl http://localhost:3000/api/portal/usage -H "Authorization: Bearer $TOKEN"
+```
+
+Both usage routes return the same current owner's authoritative meter:
+`{ "data": { "period_start": "<UTC ISO>", "period_end": "<UTC ISO>",
+"billable_calls": 0, "quota": 1000, "remaining": 1000 } }`.
+`period_end` is the reset instant (UTC calendar month, start inclusive/end exclusive).
+JWT usage calls consume no key allowance. Revocation does not reduce usage;
+absent current-period records read as zero, but storage failures return rich 500,
+never fabricated zero. Unknown queries are rejected. Runtime HTTP coverage lives
+in `key-management.test.ts` and mixed-version `v1-accounting.test.ts`; complete
+OpenAPI management contracts and browser/runtime rollout remain later M4 tasks.
 
 `shared/http-errors.ts` supplies the five-field rich envelope (`code`, `message`,
 `next_action`, `retryable`, `details`), reused at this new boundary without
@@ -631,7 +661,7 @@ are 403/404/409. Quota errors use 403 `QUOTA_EXCEEDED` and the exact UTC reset
 in a detail with parameter `quota`, reason `monthly_quota_exceeded`, empty
 `allowed_values` and reset ISO timestamp as `suggestion`. Rate errors use 429
 `RATE_LIMITED`, retryable true and the same wait in `Retry-After` and guidance.
-These helpers do not yet wire accounting into ad routes. The ad-specific adapter
+The ad-specific adapter
 preserves existing M3 corrections and codes; raw exceptions are never logged.
 
 ### Durable accounting primitives
@@ -667,12 +697,13 @@ not use the standalone credential lookup as a control bypass. The v1 root owns
 one Bearer authentication/admission boundary before resource scope and input
 validation, including unsupported routes/methods and malformed paths. Ads and
 niches require `search:read`; errors retain the rich no-store envelope. Child
-routers precede one root fallback/error boundary, leaving management paths
-available for composition. Portal JWT authentication is unchanged; v0 integration
-remains a separate M4 slice.
+routers precede the root fallback/error boundary. Management/usage require
+`keys:manage`. Portal JWT authentication is unchanged. V0 extracts exactly one
+nonempty query `api_key` and admits before its unchanged forgiving parser;
+validly authenticated invalid paths/methods/parameters share the same allowance.
 
 `src/usage/billing.ts` provides settlement and owner usage operations.
-V1 ad search/detail enforce billing via `src/usage/http.ts`; callers authenticate first, supply
+V0 search and v1 ad search/detail enforce billing; callers authenticate first, supply
 only hashed binding identities and fully prepare/serialize a successful result
 before settlement. A live matching binding is free without extending expiry;
 a different fingerprint conflicts before quota. Missing/expired bindings and
@@ -715,8 +746,9 @@ ID. Equivalent defaults, ordering and inherited/partially repeated continuation
 filters agree. Meaningful text case/internal whitespace, versions, operations,
 cursors and page sizes remain distinct. Raw URLs, credentials, newly generated
 response cursors and live results never enter fingerprints. V1 billable reads
-accept this optional header; free endpoints ignore it. V0 control integration
-remains pending.
+and v0 search accept this optional header; free endpoints ignore it. V0 returns
+generic 400 for header/conflict/quota failures. Empty and out-of-range successful
+v0 pages bill, as do successful empty v1 searches and each continuation page.
 
 ### Repeat-safe world and demo seeding
 
@@ -875,15 +907,16 @@ failure through the root command; they never wait for random backdating.
 `GET /api/v0/ads?api_key=gethookd-public-demo-api-key-m2` serves the legacy
 contract. `apps/api/src/ads/v0/router.ts` uses the raw query parser in `parameters.ts`
 and validates the supplied key against PostgreSQL on every request; portal JWTs
-cannot substitute. Responses are not cached. All v0 failures, including database
-failures, return exactly HTTP 400 `{"error":"Invalid request"}` locally, without
-changing portal/health errors or logging raw errors, keys or request URLs.
+cannot substitute. Responses are not cached. All non-rate v0 failures, including
+database, scope, idempotency and quota failures, return exactly HTTP 400
+`{"error":"Invalid request"}` locally, without changing portal/health errors or
+logging raw errors, keys or request URLs.
 
-The accepted [v0 rate-limit exception ADR](docs/adr/0001-v0-rate-limit-exception.md)
-records an **M4-only** compatibility exception: rate-limit failures will return
-HTTP 429 with accurate `Retry-After`. M2's generic 400 behavior and contract tests
-remain unchanged; exception implementation, rate-limit tests and the regression
-contract update belong to M4.
+The implemented [v0 rate-limit exception ADR](docs/adr/0001-v0-rate-limit-exception.md)
+is the only exception: HTTP 429 with accurate integer `Retry-After` and the shared
+rich `RATE_LIMITED` envelope. Its message and next action state the same wait.
+V0 and v1 share one rolling per-key allowance; invalid authenticated requests also
+consume it, but ambiguous/missing/invalid/revoked credentials do not.
 
 Success is `{"data":[...],"page":1,"total":123}`. Each ad contains only string
 `id`, brand name `brand`, `headline`, niche display name `niche`, `format`,
