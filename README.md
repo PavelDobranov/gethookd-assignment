@@ -241,7 +241,14 @@ The public defaults are **local development fixtures**. Changing `POSTGRES_*` do
 
 Milestone specifications, plans, and progress are tracked in **GitHub Issues** as the source of truth.
 
-## Known Limitations
+## Unfinished Work
 
-- **M5 — evaluation pending:** Caller Bearer-key forwarding is implemented and REST enforces all shared controls; the remaining M5 item is real-model evaluation evidence (`MCP_EVAL.md`). Oversized MCP result-size limiting, portal first-call detection, Playwright/browser E2E, and automated evaluation replay are deferred by decision — see [MCP Server](#mcp-server).
-- **Local demo only:** Default credentials, secrets, and Docker configuration are not production-ready.
+Remaining work is tracked in the repository's open [GitHub Issues](https://github.com/PavelDobranov/gethookd-assignment/issues?q=is%3Aissue+is%3Aopen). The core is the M5 real-model evaluation, which must be run and recorded before the milestone can be accepted:
+
+- **Record the five-task baseline** ([#135](https://github.com/PavelDobranov/gethookd-assignment/issues/135)) — run the five evaluation prompts from specification #118 against real Claude Code, each in a fresh isolated session, and record prompts, first tool calls, errors, and first-try judgments in `docs/MCP_EVAL.md`.
+- **Refine tool guidance from the baseline** ([#136](https://github.com/PavelDobranov/gethookd-assignment/issues/136)) — make focused tool description and error-wording improvements justified by the observed baseline, without changing REST contracts, response codes, billing identities, or the prompts.
+- **Record the after-evaluation and finalize evidence** ([#137](https://github.com/PavelDobranov/gethookd-assignment/issues/137)) — rerun the same five tasks after refinements, record all ten scored outcomes honestly (including any unmet requirements), and link the evidence from this README with remaining gaps in priority order.
+- **Final specification acceptance** ([#138](https://github.com/PavelDobranov/gethookd-assignment/issues/138)) — human review checkpoint for specification #118 and all recorded limitations before closure.
+- **Usage-refresh focus test failure** ([#139](https://github.com/PavelDobranov/gethookd-assignment/issues/139)) — a reproducible web test failure (`apps/web/tests/usage.test.tsx`): the Refresh usage button loses focus after a refresh. Diagnose whether the cause is browser behavior, jsdom/user-event scheduling, or the test expectation, and fix it without weakening the focus assertion.
+
+**Deferred by explicit decision** (out of scope for this assessment): an enforced MCP response-size budget, portal first-call detection, Playwright/browser E2E, and automated evaluation replay — see the [MCP Server](#mcp-server) limits.
