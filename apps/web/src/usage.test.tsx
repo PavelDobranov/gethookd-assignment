@@ -2,8 +2,8 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import { Usage } from "./legacy-usage";
 import { getUsage, type OwnerUsage, PortalError } from "./portal-api";
-import { Usage } from "./usage";
 
 vi.mock("./portal-api", async (original) => ({
   ...(await original<typeof import("./portal-api")>()),

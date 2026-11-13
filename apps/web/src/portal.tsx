@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
+import { Usage } from "./legacy-usage";
 import {
   createKey,
   type KeyList,
@@ -9,7 +10,6 @@ import {
   PortalError,
   revokeKey,
 } from "./portal-api";
-import { Usage } from "./usage";
 
 interface PortalProps {
   token: string;

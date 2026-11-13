@@ -850,6 +850,57 @@ h3 {
   text-align: center;
 }
 
+/* ---- Connected views ---------------------------------------------------- */
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.quota-number {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.quota-number .muted {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.summary-counts {
+  display: flex;
+  gap: 48px;
+  margin: 0;
+}
+
+.summary-counts dt {
+  font-size: 13px;
+  color: var(--secondary-text);
+}
+
+.summary-counts dd {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.scope-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.scope-fields legend {
+  margin-bottom: 12px;
+}
+
+.scope-description {
+  display: block;
+  font-size: 13px;
+}
+
 /* ---- Utilities ---------------------------------------------------------- */
 
 .stack {
