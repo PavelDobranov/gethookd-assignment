@@ -213,13 +213,9 @@ it("agrees with v0 across UTC midnight and after deactivation using current join
 it("returns a sanitized 500 when the detail query fails after successful authentication", async () => {
   const logs = ["error", "warn", "log", "info"] as const;
   const spies = logs.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
-  const select = connection.db.select.bind(connection.db);
-  const failure = vi
-    .spyOn(connection.db, "select")
-    .mockImplementationOnce(select)
-    .mockImplementationOnce(() => {
-      throw new Error(`SELECT inserted_xid credential-sentinel ${key}`);
-    });
+  const failure = vi.spyOn(connection.db, "select").mockImplementationOnce(() => {
+    throw new Error(`SELECT inserted_xid credential-sentinel ${key}`);
+  });
   try {
     const error = await expectError(await request(`/ads/${detailId}`), 500, "INTERNAL_ERROR");
     expect(error.details).toEqual([]);
@@ -349,9 +345,9 @@ it("rejects duplicate Authorization headers even when Node would discard one", a
 it("keeps injected database failures as sanitized 500s without logging raw diagnostics", async () => {
   const logs = ["error", "warn", "log", "info"] as const;
   const spies = logs.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
-  const failure = vi.spyOn(connection.db, "select").mockImplementationOnce(() => {
-    throw new Error(`SELECT credential-sentinel ${key} cursor-sentinel`);
-  });
+  const failure = vi
+    .spyOn(connection.db.$client, "connect")
+    .mockRejectedValueOnce(new Error(`SELECT credential-sentinel ${key} cursor-sentinel`));
   try {
     const error = await expectError(await request("/niches?cursor=cursor-sentinel"), 500, "INTERNAL_ERROR");
     expect(error.details).toEqual([]);

@@ -6,3 +6,4 @@ export {
   listApiKeys,
   revokeApiKey,
 } from "./lifecycle.js";
+export { createRequireApiKey, type KeyHandler, type KeyResponse, requireScope } from "./middleware.js";

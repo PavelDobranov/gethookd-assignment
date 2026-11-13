@@ -663,8 +663,13 @@ without appending or extending the window. Invalid/revoked attempts change no
 usage state. Independent pools/processes share this durable per-key allowance;
 other keys remain independent. Operational failures propagate without admission.
 Callers must await this commit before scope/input/read/settlement work and must
-not use the standalone credential lookup as a control bypass. HTTP wiring is
-still pending; portal JWT authentication is unchanged.
+not use the standalone credential lookup as a control bypass. The v1 root owns
+one Bearer authentication/admission boundary before resource scope and input
+validation, including unsupported routes/methods and malformed paths. Ads and
+niches require `search:read`; errors retain the rich no-store envelope. Child
+routers precede one root fallback/error boundary, leaving management paths
+available for composition. Portal JWT authentication is unchanged; v0 integration
+remains a separate M4 slice.
 
 `src/usage/billing.ts` provides internal settlement and owner usage operations;
 HTTP enforcement is not connected yet. Callers must authenticate first, supply

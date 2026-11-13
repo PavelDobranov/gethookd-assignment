@@ -239,9 +239,7 @@ it.each(paths)("validates 401 and injected database 500 for GET %s", async (oper
   for (const auth of [null, "Basic invalid", "Bearer invalid", "Bearer portal.jwt.token"]) {
     await expectError(path, operation, 401, "UNAUTHENTICATED", auth);
   }
-  const spy = vi.spyOn(connection.db, "select").mockImplementationOnce(() => {
-    throw new Error("private SQL sentinel");
-  });
+  const spy = vi.spyOn(connection.db.$client, "connect").mockRejectedValueOnce(new Error("private SQL sentinel"));
   try {
     expect(JSON.stringify(await expectError(path, operation, 500, "INTERNAL_ERROR"))).not.toContain(
       "private SQL sentinel",
