@@ -1,7 +1,7 @@
 import express, { type Express } from "express";
 
-import { createAdsRouter } from "./ads/router.js";
-import { createV1Router } from "./ads/v1-router.js";
+import { createRouter as createV0Router } from "./ads/v0/router.js";
+import { createRouter as createV1Router } from "./ads/v1/router.js";
 import { createAuthRouter } from "./auth/index.js";
 import { developmentCursorSecret } from "./config.js";
 import type { createDatabase } from "./db/client.js";
@@ -21,7 +21,7 @@ export function createApp({ db, jwtSecret, cursorSecret = developmentCursorSecre
 
   app.use("/api/auth", createAuthRouter({ db, jwtSecret }));
 
-  app.use("/api/v0", createAdsRouter({ db }));
+  app.use("/api/v0", createV0Router({ db }));
 
   app.use("/api/v1", createV1Router({ db, cursorSecret }));
 

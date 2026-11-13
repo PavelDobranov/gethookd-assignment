@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
-import { type Ad, adFormats, adStatuses, niches } from "./model.js";
+import { type Ad, adFormats, adStatuses, niches } from "../model.js";
 
 export type CursorQuery = {
   q: string;

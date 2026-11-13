@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
-import type { createDatabase } from "../db/client.js";
-import { ads, brands } from "../db/schema.js";
+import type { createDatabase } from "../../db/client.js";
+import { ads, brands } from "../../db/schema.js";
 import type { CursorQuery, CursorState } from "./cursor.js";
 import { visibleAtBoundary } from "./visibility.js";
 
@@ -9,7 +9,7 @@ type Database = ReturnType<typeof createDatabase>["db"];
 
 // Both initial and continuation reads share filters, ordering and projection.
 // A transaction can supply select without exposing HTTP concerns to the query.
-export function queryV1Ads(
+export function queryAds(
   db: Pick<Database, "select">,
   query: CursorQuery,
   limit: number,

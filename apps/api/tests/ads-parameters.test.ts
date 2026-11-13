@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { adFormats, adStatuses, niches } from "../src/ads/model.js";
-import { parseAdParameters } from "../src/ads/parameters.js";
+import { parseAdParameters } from "../src/ads/v0/parameters.js";
 
 function parse(query = "") {
   return parseAdParameters(new URLSearchParams(`api_key=test-key&${query}`));

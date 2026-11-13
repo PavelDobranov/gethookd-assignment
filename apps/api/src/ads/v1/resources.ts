@@ -1,15 +1,15 @@
 import { eq } from "drizzle-orm";
 
-import type { createDatabase } from "../db/client.js";
-import { ads, brands } from "../db/schema.js";
-import { daysActive } from "./model.js";
+import type { createDatabase } from "../../db/client.js";
+import { ads, brands } from "../../db/schema.js";
+import { daysActive } from "../model.js";
 
 type SummaryRow = Pick<
   typeof ads.$inferSelect,
   "id" | "brandId" | "headline" | "niche" | "format" | "status" | "startDate" | "endDate" | "impressionRank"
 > & { brandName: string };
 
-export function mapV1AdSummary(row: SummaryRow, now: Date) {
+export function mapAdSummary(row: SummaryRow, now: Date) {
   return {
     id: row.id,
     brand_id: row.brandId,
@@ -34,7 +34,7 @@ export function mapV1AdSummary(row: SummaryRow, now: Date) {
   };
 }
 
-export async function getV1Ad(db: ReturnType<typeof createDatabase>["db"], id: string) {
+export async function getAd(db: ReturnType<typeof createDatabase>["db"], id: string) {
   const [row] = await db
     .select({
       id: ads.id,
@@ -58,7 +58,7 @@ export async function getV1Ad(db: ReturnType<typeof createDatabase>["db"], id: s
   if (!row) return null;
   const now = new Date();
   return {
-    ...mapV1AdSummary(row, now),
+    ...mapAdSummary(row, now),
     body_text: row.bodyText,
     end_date: row.endDate,
     countries: row.countries,

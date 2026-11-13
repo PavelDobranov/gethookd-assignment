@@ -1,4 +1,4 @@
-import { type Ad, adFormats, adStatuses, niches } from "./model.js";
+import { type Ad, adFormats, adStatuses, niches } from "../model.js";
 
 export type AdParameters = {
   q: string;

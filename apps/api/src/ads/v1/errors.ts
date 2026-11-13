@@ -51,7 +51,7 @@ const errors = {
   },
 } as const;
 
-export function sendV1Error(res: Response, code: keyof typeof errors, details: ValidationDetail[] = []) {
+export function sendError(res: Response, code: keyof typeof errors, details: ValidationDetail[] = []) {
   const definition = errors[code];
   const requiresBrand =
     code === "VALIDATION_ERROR" && details.some((detail) => detail.reason === "required_for_impressions");
@@ -64,7 +64,7 @@ export function sendV1Error(res: Response, code: keyof typeof errors, details: V
     .json({ error: { code, message, next_action, retryable: definition.status === 500, details } });
 }
 
-export const handleV1Errors: ErrorRequestHandler = (_error, _req, res, _next) => {
+export const handleErrors: ErrorRequestHandler = (_error, _req, res, _next) => {
   // Raw exceptions can include SQL, credentials and cursor contents. Never log them.
-  sendV1Error(res, "INTERNAL_ERROR");
+  sendError(res, "INTERNAL_ERROR");
 };

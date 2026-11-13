@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 
-import type { createDatabase } from "../db/client.js";
-import { ads } from "../db/schema.js";
+import type { createDatabase } from "../../db/client.js";
+import { ads } from "../../db/schema.js";
 
 type Database = ReturnType<typeof createDatabase>["db"];
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];

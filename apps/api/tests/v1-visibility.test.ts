@@ -2,7 +2,7 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
 
-import { readFirstPage, visibleAtBoundary } from "../src/ads/visibility.js";
+import { readFirstPage, visibleAtBoundary } from "../src/ads/v1/visibility.js";
 import { createDatabase } from "../src/db/client.js";
 import { generateFixtures } from "../src/db/fixtures.js";
 import { ads, brands } from "../src/db/schema.js";

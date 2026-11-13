@@ -1,14 +1,14 @@
 import { type RequestHandler, Router } from "express";
 
-import { validateApiKey } from "../api-keys/index.js";
-import type { createDatabase } from "../db/client.js";
-import { disableCaching } from "../shared/middleware/disable-caching.js";
+import { validateApiKey } from "../../api-keys/index.js";
+import type { createDatabase } from "../../db/client.js";
+import { disableCaching } from "../../shared/middleware/disable-caching.js";
+import { niches } from "../model.js";
 import { CursorError, type CursorState, createCursorCodec } from "./cursor.js";
-import { niches } from "./model.js";
-import { handleV1Errors, sendV1Error } from "./v1-errors.js";
-import { normalizeV1Parameters, parseV1Parameters, validateV1Parameters } from "./v1-parameters.js";
-import { queryV1Ads } from "./v1-query.js";
-import { getV1Ad, mapV1AdSummary } from "./v1-resources.js";
+import { handleErrors, sendError } from "./errors.js";
+import { normalizeParameters, parseParameters, validateParameters } from "./parameters.js";
+import { queryAds } from "./query.js";
+import { getAd, mapAdSummary } from "./resources.js";
 import { readFirstPage } from "./visibility.js";
 
 function createAuthenticateHandler(db: ReturnType<typeof createDatabase>["db"]): RequestHandler {
@@ -18,7 +18,7 @@ function createAuthenticateHandler(db: ReturnType<typeof createDatabase>["db"]):
     );
     const match = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/i.exec(req.headers.authorization ?? "");
     if (credentials.length !== 1 || !match || !(await validateApiKey(db, match[1]))) {
-      sendV1Error(res, "UNAUTHENTICATED");
+      sendError(res, "UNAUTHENTICATED");
       return;
     }
     next();
@@ -29,7 +29,7 @@ const validatePath: RequestHandler = (req, res, next) => {
   try {
     decodeURI(req.path);
   } catch {
-    sendV1Error(res, "VALIDATION_ERROR", [
+    sendError(res, "VALIDATION_ERROR", [
       { parameter: "path", reason: "malformed_encoding", allowed_values: [], suggestion: null },
     ]);
     return;
@@ -46,7 +46,7 @@ const handleGetNiches: RequestHandler = (req, res, next) => {
   const queryStart = req.originalUrl.indexOf("?");
   const parameters = new URLSearchParams(queryStart === -1 ? "" : req.originalUrl.slice(queryStart + 1));
   if (parameters.size > 0) {
-    sendV1Error(res, "VALIDATION_ERROR", [
+    sendError(res, "VALIDATION_ERROR", [
       { parameter: "query", reason: "unknown_parameter", allowed_values: [], suggestion: null },
     ]);
     return;
@@ -63,21 +63,21 @@ function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): Reques
     const queryStart = req.originalUrl.indexOf("?");
     const parameters = new URLSearchParams(queryStart === -1 ? "" : req.originalUrl.slice(queryStart + 1));
     if (parameters.size > 0) {
-      sendV1Error(res, "VALIDATION_ERROR", [
+      sendError(res, "VALIDATION_ERROR", [
         { parameter: "query", reason: "unknown_parameter", allowed_values: [], suggestion: null },
       ]);
       return;
     }
     // PostgreSQL text cannot represent NUL; reject it as input, not a server failure.
     if (req.params.id.includes("\0")) {
-      sendV1Error(res, "VALIDATION_ERROR", [
+      sendError(res, "VALIDATION_ERROR", [
         { parameter: "id", reason: "invalid_text", allowed_values: [], suggestion: null },
       ]);
       return;
     }
-    const ad = await getV1Ad(db, req.params.id);
+    const ad = await getAd(db, req.params.id);
     if (!ad) {
-      sendV1Error(res, "AD_NOT_FOUND");
+      sendError(res, "AD_NOT_FOUND");
       return;
     }
     res.json({ data: ad });
@@ -93,16 +93,14 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
     }
     const now = new Date();
     const queryStart = req.originalUrl.indexOf("?");
-    const parsed = parseV1Parameters(
-      new URLSearchParams(queryStart === -1 ? "" : req.originalUrl.slice(queryStart + 1)),
-    );
+    const parsed = parseParameters(new URLSearchParams(queryStart === -1 ? "" : req.originalUrl.slice(queryStart + 1)));
     if (parsed.error) {
-      sendV1Error(res, parsed.error.code, parsed.error.details);
+      sendError(res, parsed.error.code, parsed.error.details);
       return;
     }
-    const validated = validateV1Parameters(parsed.value);
+    const validated = validateParameters(parsed.value);
     if (validated.error) {
-      sendV1Error(res, validated.error.code, validated.error.details);
+      sendError(res, validated.error.code, validated.error.details);
       return;
     }
     let original: CursorState | undefined;
@@ -110,18 +108,18 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
       original = validated.value.cursor === undefined ? undefined : codec.decode(validated.value.cursor);
     } catch (error) {
       if (!(error instanceof CursorError)) throw error;
-      sendV1Error(res, error.code);
+      sendError(res, error.code);
       return;
     }
-    const normalized = normalizeV1Parameters(validated.value, original?.query);
+    const normalized = normalizeParameters(validated.value, original?.query);
     if (normalized.error) {
-      sendV1Error(res, normalized.error.code, normalized.error.details);
+      sendError(res, normalized.error.code, normalized.error.details);
       return;
     }
     const { query, limit } = normalized.value;
     const page = original
-      ? { snapshot: original.snapshot, data: await queryV1Ads(db, query, limit, original) }
-      : await readFirstPage(db, (tx) => queryV1Ads(tx, query, limit));
+      ? { snapshot: original.snapshot, data: await queryAds(db, query, limit, original) }
+      : await readFirstPage(db, (tx) => queryAds(tx, query, limit));
     const rows = page.data.slice(0, limit);
     const last = rows.at(-1);
     const issuedAt = original?.issuedAt ?? now.getTime();
@@ -140,7 +138,7 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
           })
         : null;
     res.json({
-      data: rows.map((row) => mapV1AdSummary(row, now)),
+      data: rows.map((row) => mapAdSummary(row, now)),
       applied_filters: {
         q: query.q,
         niche: query.niche,
@@ -158,10 +156,10 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
 }
 
 const handleNotFound: RequestHandler = (_req, res) => {
-  sendV1Error(res, "NOT_FOUND");
+  sendError(res, "NOT_FOUND");
 };
 
-export function createV1Router({
+export function createRouter({
   db,
   cursorSecret,
 }: {
@@ -177,7 +175,7 @@ export function createV1Router({
   router.get("/ads", createSearchHandler(db, cursorSecret));
   router.get("/ads/:id", createGetAdHandler(db));
   router.use(handleNotFound);
-  router.use(handleV1Errors);
+  router.use(handleErrors);
 
   return router;
 }

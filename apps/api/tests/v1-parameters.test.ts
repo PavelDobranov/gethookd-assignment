@@ -1,21 +1,21 @@
 import type { Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 
-import type { CursorQuery } from "../src/ads/cursor.js";
-import { sendV1Error } from "../src/ads/v1-errors.js";
-import { normalizeV1Parameters, parseV1Parameters, validateV1Parameters } from "../src/ads/v1-parameters.js";
+import type { CursorQuery } from "../src/ads/v1/cursor.js";
+import { sendError } from "../src/ads/v1/errors.js";
+import { normalizeParameters, parseParameters, validateParameters } from "../src/ads/v1/parameters.js";
 
 function validate(entries: Record<string, string> | [string, string][]) {
-  const parsed = parseV1Parameters(new URLSearchParams(entries));
+  const parsed = parseParameters(new URLSearchParams(entries));
   if (parsed.error) throw new Error("Test expected structurally valid parameters");
-  return validateV1Parameters(parsed.value);
+  return validateParameters(parsed.value);
 }
 
 const names = ["q", "niche", "format", "status", "started_after", "brand_id", "sort", "limit", "cursor"];
 
 function normalize(entries: Record<string, string> | [string, string][], original?: CursorQuery) {
   const validated = validate(entries);
-  return validated.error ? validated : normalizeV1Parameters(validated.value, original);
+  return validated.error ? validated : normalizeParameters(validated.value, original);
 }
 
 const defaults: CursorQuery = {
@@ -42,7 +42,7 @@ describe("safe search error guidance", () => {
     "formats %s with fresh-search guidance",
     (code) => {
       const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-      sendV1Error(res as unknown as Response, code);
+      sendError(res as unknown as Response, code);
       expect(res.status).toHaveBeenCalledWith(422);
       expect(res.json).toHaveBeenCalledWith({
         error: {
@@ -60,7 +60,7 @@ describe("safe search error guidance", () => {
     const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
     const error = normalize({ sort: "impressions" }).error;
     if (!error) throw new Error("Expected missing-brand diagnostic");
-    sendV1Error(res as unknown as Response, error.code, error.details);
+    sendError(res as unknown as Response, error.code, error.details);
     expect(res.json).toHaveBeenCalledWith({
       error: {
         code: "VALIDATION_ERROR",
@@ -103,7 +103,7 @@ describe("effective v1 search normalization", () => {
       ["limit", "0001"],
     ]);
     if (validated.error) throw new Error("Expected valid input");
-    expect(normalizeV1Parameters(validated.value).value).toEqual({
+    expect(normalizeParameters(validated.value).value).toEqual({
       query: { ...defaults, niche: ["fitness", "skincare"], brandId: 12 },
       limit: 1,
       cursor: undefined,
@@ -295,20 +295,20 @@ describe("v1 search value validation", () => {
 
 describe("raw v1 search parsing", () => {
   it("preserves omitted versus supplied empty parameters without applying defaults", () => {
-    expect(parseV1Parameters(new URLSearchParams())).toEqual({ value: {} });
-    expect(parseV1Parameters(new URLSearchParams("q=&niche=&limit="))).toEqual({
+    expect(parseParameters(new URLSearchParams())).toEqual({ value: {} });
+    expect(parseParameters(new URLSearchParams("q=&niche=&limit="))).toEqual({
       value: { q: "", niche: [""], limit: "" },
     });
   });
 
   it("preserves every repeated niche for later validation", () => {
-    expect(parseV1Parameters(new URLSearchParams("niche=skincare&niche=fitness&niche=skincare"))).toEqual({
+    expect(parseParameters(new URLSearchParams("niche=skincare&niche=fitness&niche=skincare"))).toEqual({
       value: { niche: ["skincare", "fitness", "skincare"] },
     });
   });
 
   it.each(names.filter((name) => name !== "niche"))("rejects duplicate scalar %s even when equal", (name) => {
-    expect(parseV1Parameters(new URLSearchParams(`${name}=same&${name}=same`))).toEqual({
+    expect(parseParameters(new URLSearchParams(`${name}=same&${name}=same`))).toEqual({
       error: {
         code: "VALIDATION_ERROR",
         details: [{ parameter: name, reason: "duplicate_parameter", allowed_values: [], suggestion: null }],
@@ -319,7 +319,7 @@ describe("raw v1 search parsing", () => {
   it.each(["Niche", "niche[]", "niche[x]", "page", "per_page", "api_key", "__proto__", "💥"])(
     "rejects literal unknown name %s without reflecting it",
     (name) => {
-      const result = parseV1Parameters(new URLSearchParams([[name, "private-value"]]));
+      const result = parseParameters(new URLSearchParams([[name, "private-value"]]));
       expect(result).toEqual({
         error: {
           code: "VALIDATION_ERROR",
@@ -331,7 +331,7 @@ describe("raw v1 search parsing", () => {
   );
 
   it("suggests the agreed nich correction without repairing the request", () => {
-    expect(parseV1Parameters(new URLSearchParams("nich=skincare"))).toEqual({
+    expect(parseParameters(new URLSearchParams("nich=skincare"))).toEqual({
       error: {
         code: "VALIDATION_ERROR",
         details: [{ parameter: "query", reason: "unknown_parameter", allowed_values: names, suggestion: "niche" }],
@@ -340,7 +340,7 @@ describe("raw v1 search parsing", () => {
   });
 
   it("uses decoded names but never interprets brackets as arrays", () => {
-    expect(parseV1Parameters(new URLSearchParams("%71=Hello+World"))).toEqual({ value: { q: "Hello World" } });
-    expect(parseV1Parameters(new URLSearchParams("niche%5B%5D=fitness"))).toHaveProperty("error");
+    expect(parseParameters(new URLSearchParams("%71=Hello+World"))).toEqual({ value: { q: "Hello World" } });
+    expect(parseParameters(new URLSearchParams("niche%5B%5D=fitness"))).toHaveProperty("error");
   });
 });

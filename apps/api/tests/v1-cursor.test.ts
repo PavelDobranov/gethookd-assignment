@@ -1,7 +1,7 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-import { type CursorInput, createCursorCodec } from "../src/ads/cursor.js";
+import { type CursorInput, createCursorCodec } from "../src/ads/v1/cursor.js";
 
 const secret = "test-only-independent-cursor-secret-123456";
 const firstPageTime = Date.parse("2026-10-03T12:00:00.000Z");

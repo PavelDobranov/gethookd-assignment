@@ -1,6 +1,6 @@
+import { adFormats, adStatuses, niches } from "../model.js";
 import type { CursorQuery } from "./cursor.js";
-import { adFormats, adStatuses, niches } from "./model.js";
-import type { ValidationDetail } from "./v1-errors.js";
+import type { ValidationDetail } from "./errors.js";
 
 const parameterNames = [
   "q",
@@ -37,7 +37,7 @@ function invalid(
 }
 
 // Read raw URLSearchParams, not Express's parsed query object: brackets stay literal.
-export function parseV1Parameters(parameters: URLSearchParams): ParameterResult<RawParameters> {
+export function parseParameters(parameters: URLSearchParams): ParameterResult<RawParameters> {
   const value: RawParameters = {};
   for (const name of parameters.keys()) {
     if (!parameterNames.some((allowed) => allowed === name)) {
@@ -69,7 +69,7 @@ const sorts = ["newest", "impressions"] as const;
 type SearchParameters = { query: CursorQuery; limit: number; cursor: string | undefined };
 
 // Pass original only after authenticating/decoding the cursor; validation must run first.
-export function normalizeV1Parameters(
+export function normalizeParameters(
   value: ValidatedParameters,
   original?: CursorQuery,
 ): ParameterResult<SearchParameters> {
@@ -103,7 +103,7 @@ export function normalizeV1Parameters(
 }
 
 // Validation checks supplied values only. Defaults, conversions and deduplication come later.
-export function validateV1Parameters(raw: RawParameters): ParameterResult<ValidatedParameters> {
+export function validateParameters(raw: RawParameters): ParameterResult<ValidatedParameters> {
   const value: ValidatedParameters = {};
   if (raw.q !== undefined) {
     if (raw.q.includes("\0")) return invalid("q", "invalid_text");
