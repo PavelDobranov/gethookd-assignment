@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -59,6 +59,9 @@ function Harness() {
       <output data-testid="keys">{state.keys.status}</output>
       <output data-testid="summary">{state.summary.status}</output>
       <output data-testid="secret">{state.create.secret}</output>
+      <output data-testid="create-error">{state.create.error}</output>
+      <output data-testid="pending">{String(state.create.pending)}</output>
+      <output data-testid="mutating">{String(state.keys.mutating)}</output>
       <output data-testid="modal">{state.ui.modal}</output>
       <output data-testid="toast">{state.ui.toast ?? ""}</output>
       <button type="button" onClick={() => void actions.signIn({ username: "demo", password: "pw" })}>
@@ -78,6 +81,18 @@ function Harness() {
       </button>
       <button type="button" onClick={() => void actions.revokeKey(metaKey.id)}>
         revoke
+      </button>
+      <button type="button" onClick={() => void actions.restoreSession()}>
+        restore
+      </button>
+      <button type="button" onClick={() => actions.closeModal()}>
+        close
+      </button>
+      <button type="button" onClick={() => actions.setView("usage")}>
+        view
+      </button>
+      <button type="button" onClick={() => actions.dismissSecret()}>
+        dismisssecret
       </button>
       <button type="button" onClick={() => actions.signOut()}>
         signout
@@ -107,6 +122,7 @@ async function signInAndHydrate() {
 }
 
 beforeEach(() => {
+  vi.resetAllMocks();
   vi.mocked(api.getUsage).mockResolvedValue(usage);
   vi.mocked(api.listKeys).mockResolvedValue(page);
   vi.mocked(api.summarizeKeys).mockResolvedValue(summary);
@@ -185,6 +201,16 @@ it("revokeKey closes the dialog, raises a toast, then re-pulls keys and summary"
   });
 });
 
+it("clears a previous toast before opening a revoke dialog", async () => {
+  const u = await signInAndHydrate();
+  await u.click(screen.getByRole("button", { name: "openrevoke" }));
+  await u.click(screen.getByRole("button", { name: "revoke" }));
+  await waitFor(() => expect(screen.getByTestId("toast").textContent).toContain("revoked."));
+  await u.click(screen.getByRole("button", { name: "openrevoke" }));
+  expect(screen.getByTestId("modal").textContent).toBe("revoke");
+  expect(screen.getByTestId("toast").textContent).toBe("");
+});
+
 it("signing out clears the session and its data, and forgets the token", async () => {
   const u = await signInAndHydrate();
   await u.click(screen.getByRole("button", { name: "signout" }));
@@ -192,4 +218,230 @@ it("signing out clears the session and its data, and forgets the token", async (
   expect(auth.clearToken).toHaveBeenCalled();
   expect(screen.getByTestId("keys").textContent).toBe("idle");
   expect(screen.getByTestId("usage").textContent).toBe("idle");
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+it("reports storage-read failures on the anonymous session", async () => {
+  vi.mocked(auth.readToken).mockImplementationOnce(() => {
+    throw new auth.AuthError("storage", "Session storage is unavailable.");
+  });
+  render(
+    <PortalProvider>
+      <Harness />
+    </PortalProvider>,
+  );
+  await waitFor(() => expect(screen.getByTestId("session").textContent).toBe("anonymous"));
+  expect(screen.getByTestId("session-error").textContent).toBe("Session storage is unavailable.");
+});
+
+it("rejects create without scopes before making a request", async () => {
+  const u = await signInAndHydrate();
+  await u.click(screen.getByRole("button", { name: "opencreate" }));
+  await u.click(screen.getByRole("button", { name: "create" }));
+  expect(api.createKey).not.toHaveBeenCalled();
+  expect(screen.getByTestId("create-error").textContent).toBe("Select at least one scope.");
+  expect(screen.getByTestId("pending").textContent).toBe("false");
+  expect(screen.getByTestId("mutating").textContent).toBe("false");
+});
+
+it.each(["close", "view", "opencreate", "openrevoke", "dismisssecret"])(
+  "does not reveal a late create secret after %s, but refreshes same-session resources",
+  async (invalidate) => {
+    const request = deferred<CreatedKey>();
+    vi.mocked(api.createKey).mockReturnValueOnce(request.promise);
+    const u = await signInAndHydrate();
+    await u.click(screen.getByRole("button", { name: "opencreate" }));
+    await u.click(screen.getByRole("button", { name: "scope" }));
+    await u.click(screen.getByRole("button", { name: "create" }));
+    await u.click(screen.getByRole("button", { name: invalidate }));
+    if (invalidate === "close") await u.click(screen.getByRole("button", { name: "opencreate" }));
+    const modal = screen.getByTestId("modal").textContent;
+    const keysBefore = vi.mocked(api.listKeys).mock.calls.length;
+    const summaryBefore = vi.mocked(api.summarizeKeys).mock.calls.length;
+    await act(async () => request.resolve(created));
+    expect(screen.getByTestId("secret").textContent).toBe("");
+    expect(screen.getByTestId("modal").textContent).toBe(modal);
+    expect(api.listKeys).toHaveBeenCalledTimes(keysBefore + 1);
+    expect(api.summarizeKeys).toHaveBeenCalledTimes(summaryBefore + 1);
+  },
+);
+
+it.each(["create", "revoke"] as const)("does not apply a late %s error to a reopened modal", async (kind) => {
+  const request = deferred<never>();
+  if (kind === "create") vi.mocked(api.createKey).mockReturnValueOnce(request.promise);
+  else vi.mocked(api.revokeKey).mockReturnValueOnce(request.promise);
+  const u = await signInAndHydrate();
+  await u.click(screen.getByRole("button", { name: `open${kind}` }));
+  if (kind === "create") await u.click(screen.getByRole("button", { name: "scope" }));
+  await u.click(screen.getByRole("button", { name: kind }));
+  await u.click(screen.getByRole("button", { name: "close" }));
+  await u.click(screen.getByRole("button", { name: `open${kind}` }));
+  await act(async () => request.reject(new Error("untrusted server detail")));
+  expect(screen.getByTestId("create-error").textContent).toBe("");
+  expect(screen.getByTestId("toast").textContent).toBe("");
+  expect(screen.getByTestId("modal").textContent).toBe(kind);
+  expect(screen.getByTestId("mutating").textContent).toBe("false");
+});
+
+it("does not close a new modal when an old revoke succeeds", async () => {
+  const request = deferred<void>();
+  vi.mocked(api.revokeKey).mockReturnValueOnce(request.promise);
+  const u = await signInAndHydrate();
+  await u.click(screen.getByRole("button", { name: "openrevoke" }));
+  await u.click(screen.getByRole("button", { name: "revoke" }));
+  await u.click(screen.getByRole("button", { name: "close" }));
+  await u.click(screen.getByRole("button", { name: "openrevoke" }));
+  await act(async () => request.resolve(undefined));
+  expect(screen.getByTestId("modal").textContent).toBe("revoke");
+  expect(screen.getByTestId("toast").textContent).toBe("");
+  expect(api.listKeys).toHaveBeenCalledTimes(2);
+  expect(api.summarizeKeys).toHaveBeenCalledTimes(2);
+});
+
+it.each(["create", "revoke"] as const)(
+  "blocks duplicate and competing mutations while %s is in flight",
+  async (kind) => {
+    const request = deferred<never>();
+    if (kind === "create") vi.mocked(api.createKey).mockReturnValueOnce(request.promise);
+    else vi.mocked(api.revokeKey).mockReturnValueOnce(request.promise);
+    const u = await signInAndHydrate();
+    await u.click(screen.getByRole("button", { name: `open${kind}` }));
+    if (kind === "create") await u.click(screen.getByRole("button", { name: "scope" }));
+    await u.click(screen.getByRole("button", { name: kind }));
+    await u.click(screen.getByRole("button", { name: "close" }));
+    await u.click(screen.getByRole("button", { name: "opencreate" }));
+    await u.click(screen.getByRole("button", { name: "scope" }));
+    await u.click(screen.getByRole("button", { name: "create" }));
+    await u.click(screen.getByRole("button", { name: "openrevoke" }));
+    await u.click(screen.getByRole("button", { name: "revoke" }));
+    expect(api.createKey).toHaveBeenCalledTimes(kind === "create" ? 1 : 0);
+    expect(api.revokeKey).toHaveBeenCalledTimes(kind === "revoke" ? 1 : 0);
+    await act(async () => request.reject(new Error("failed")));
+    await u.click(screen.getByRole("button", { name: "revoke" }));
+    expect(api.revokeKey).toHaveBeenCalledTimes(kind === "revoke" ? 2 : 1);
+  },
+);
+
+it.each([
+  ["create", "success", "signout"],
+  ["create", "error", "signout"],
+  ["revoke", "success", "signout"],
+  ["revoke", "error", "signout"],
+  ["create", "success", "restore"],
+  ["create", "error", "restore"],
+  ["revoke", "success", "restore"],
+  ["revoke", "error", "restore"],
+] as const)("ignores late %s %s after %s", async (kind, outcome, transition) => {
+  const request = deferred<CreatedKey>();
+  if (kind === "create") vi.mocked(api.createKey).mockReturnValueOnce(request.promise);
+  else vi.mocked(api.revokeKey).mockReturnValueOnce(request.promise.then(() => undefined));
+  const u = await signInAndHydrate();
+  await u.click(screen.getByRole("button", { name: `open${kind}` }));
+  if (kind === "create") await u.click(screen.getByRole("button", { name: "scope" }));
+  await u.click(screen.getByRole("button", { name: kind }));
+  if (transition === "restore") vi.mocked(auth.readToken).mockReturnValue(token);
+  await u.click(screen.getByRole("button", { name: transition }));
+  const keysBefore = vi.mocked(api.listKeys).mock.calls.length;
+  const summaryBefore = vi.mocked(api.summarizeKeys).mock.calls.length;
+  const clearsBefore = vi.mocked(auth.clearToken).mock.calls.length;
+  await act(async () => {
+    if (outcome === "error") request.reject(new auth.AuthError("unauthenticated", "Expired.", 401));
+    else request.resolve(created);
+  });
+  expect(screen.getByTestId("session").textContent).toBe(transition === "restore" ? "authenticated" : "anonymous");
+  expect(screen.getByTestId("secret").textContent).toBe("");
+  expect(screen.getByTestId("toast").textContent).toBe("");
+  expect(screen.getByTestId("create-error").textContent).toBe("");
+  expect(api.listKeys).toHaveBeenCalledTimes(keysBefore);
+  expect(api.summarizeKeys).toHaveBeenCalledTimes(summaryBefore);
+  expect(auth.clearToken).toHaveBeenCalledTimes(clearsBefore);
+});
+
+it.each(["success", "error"])(
+  "invalidates all resource reads at restore start before identity settles (%s)",
+  async (outcome) => {
+    const u = await mountAnonymous();
+    const oldUsage = deferred<OwnerUsage>();
+    const oldKeys = deferred<KeyList>();
+    const oldSummary = deferred<typeof summary>();
+    vi.mocked(auth.login).mockResolvedValue({ token, user });
+    vi.mocked(auth.getIdentity).mockResolvedValue({ user });
+    vi.mocked(api.getUsage).mockReturnValueOnce(oldUsage.promise);
+    vi.mocked(api.listKeys).mockReturnValueOnce(oldKeys.promise);
+    vi.mocked(api.summarizeKeys).mockReturnValueOnce(oldSummary.promise);
+    await u.click(screen.getByRole("button", { name: "signin" }));
+    vi.mocked(auth.readToken).mockReturnValue(token);
+    const identity = deferred<{ user: typeof user }>();
+    vi.mocked(auth.getIdentity).mockReturnValueOnce(identity.promise);
+    await u.click(screen.getByRole("button", { name: "restore" }));
+    await act(async () => {
+      if (outcome === "success") {
+        oldUsage.resolve(usage);
+        oldKeys.resolve(page);
+        oldSummary.resolve(summary);
+      } else {
+        const error = new auth.AuthError("unauthenticated", "Expired.", 401);
+        oldUsage.reject(error);
+        oldKeys.reject(error);
+        oldSummary.reject(error);
+      }
+    });
+    expect(screen.getByTestId("session").textContent).toBe("checking");
+    for (const resource of ["usage", "keys", "summary"]) expect(screen.getByTestId(resource).textContent).toBe("idle");
+    expect(auth.clearToken).not.toHaveBeenCalled();
+    await act(async () => identity.resolve({ user }));
+    expect(screen.getByTestId("session").textContent).toBe("authenticated");
+  },
+);
+
+it("allows a new session to mutate while an old session request is pending without unlocking the new request", async () => {
+  const oldRequest = deferred<CreatedKey>();
+  const newRequest = deferred<CreatedKey>();
+  vi.mocked(api.createKey).mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise);
+  const u = await signInAndHydrate();
+  await u.click(screen.getByRole("button", { name: "opencreate" }));
+  await u.click(screen.getByRole("button", { name: "scope" }));
+  await u.click(screen.getByRole("button", { name: "create" }));
+  await u.click(screen.getByRole("button", { name: "signout" }));
+  await u.click(screen.getByRole("button", { name: "signin" }));
+  await waitFor(() => expect(screen.getByTestId("session").textContent).toBe("authenticated"));
+  await u.click(screen.getByRole("button", { name: "opencreate" }));
+  await u.click(screen.getByRole("button", { name: "scope" }));
+  await u.click(screen.getByRole("button", { name: "create" }));
+  expect(api.createKey).toHaveBeenCalledTimes(2);
+  await act(async () => oldRequest.resolve(created));
+  expect(screen.getByTestId("secret").textContent).toBe("");
+  await u.click(screen.getByRole("button", { name: "create" }));
+  expect(api.createKey).toHaveBeenCalledTimes(2);
+  await act(async () => newRequest.resolve(created));
+  expect(screen.getByTestId("secret").textContent).toBe(created.secret);
+});
+
+it("invalidates all resource reads on unmount, including late auth failures", async () => {
+  const requests = [deferred<OwnerUsage>(), deferred<KeyList>(), deferred<typeof summary>()] as const;
+  vi.mocked(auth.readToken).mockReturnValue(token);
+  vi.mocked(auth.getIdentity).mockResolvedValue({ user });
+  vi.mocked(api.getUsage).mockReturnValueOnce(requests[0].promise);
+  vi.mocked(api.listKeys).mockReturnValueOnce(requests[1].promise);
+  vi.mocked(api.summarizeKeys).mockReturnValueOnce(requests[2].promise);
+  const mounted = render(
+    <PortalProvider>
+      <Harness />
+    </PortalProvider>,
+  );
+  await waitFor(() => expect(api.summarizeKeys).toHaveBeenCalled());
+  mounted.unmount();
+  await act(async () => {
+    for (const request of requests) request.reject(new auth.AuthError("unauthenticated", "Expired.", 401));
+  });
+  expect(auth.clearToken).not.toHaveBeenCalled();
 });

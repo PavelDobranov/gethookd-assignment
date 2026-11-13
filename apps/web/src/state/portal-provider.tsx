@@ -46,6 +46,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   // One monotonic counter per resource; a response whose id is stale is dropped.
   const guards = useRef({ session: 0, usage: 0, keys: 0, summary: 0 });
+  const modalGeneration = useRef(0);
+  // Reducer pending state resets when a modal/session closes; the request does not.
+  const mutationInFlight = useRef<number | null>(null);
 
   const actions = useMemo<AppActions>(() => {
     const token = () => stateRef.current.session.token;
@@ -55,19 +58,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     // the pre-auth render and token() would read the stale empty string.
     async function loadUsage(authToken: string = token()): Promise<void> {
       const id = ++guards.current.usage;
+      const session = guards.current.session;
 
       dispatch({ type: "usage/loading" });
 
       try {
         const usage = await getUsage(authToken);
 
-        if (guards.current.usage !== id) {
+        if (guards.current.usage !== id || guards.current.session !== session) {
           return;
         }
 
         dispatch({ type: "usage/ready", data: usage.data });
       } catch (error) {
-        if (guards.current.usage !== id) {
+        if (guards.current.usage !== id || guards.current.session !== session) {
           return;
         }
 
@@ -84,19 +88,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       authToken: string = token(),
     ): Promise<void> {
       const id = ++guards.current.keys;
+      const session = guards.current.session;
 
       dispatch({ type: "keys/loading", pagination });
 
       try {
         const page = await listKeys(authToken, pagination);
 
-        if (guards.current.keys !== id) {
+        if (guards.current.keys !== id || guards.current.session !== session) {
           return;
         }
 
         dispatch({ type: "keys/ready", page });
       } catch (error) {
-        if (guards.current.keys !== id) {
+        if (guards.current.keys !== id || guards.current.session !== session) {
           return;
         }
 
@@ -114,19 +119,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     async function loadSummary(authToken: string = token()): Promise<void> {
       const id = ++guards.current.summary;
+      const session = guards.current.session;
 
       dispatch({ type: "summary/loading" });
 
       try {
         const summary = await summarizeKeys(authToken);
 
-        if (guards.current.summary !== id) {
+        if (guards.current.summary !== id || guards.current.session !== session) {
           return;
         }
 
         dispatch({ type: "summary/ready", summary });
       } catch (error) {
-        if (guards.current.summary !== id) {
+        if (guards.current.summary !== id || guards.current.session !== session) {
           return;
         }
 
@@ -148,8 +154,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ]).then(() => undefined);
     }
 
+    function invalidateSession(): number {
+      guards.current.usage += 1;
+      guards.current.keys += 1;
+      guards.current.summary += 1;
+      modalGeneration.current += 1;
+      return ++guards.current.session;
+    }
+
     async function restoreSession(): Promise<void> {
-      const id = ++guards.current.session;
+      const id = invalidateSession();
 
       dispatch({ type: "session/checking" });
 
@@ -157,12 +171,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
       try {
         stored = readToken();
-      } catch {
+      } catch (error) {
         if (guards.current.session !== id) {
           return;
         }
 
-        dispatch({ type: "session/anonymous" });
+        dispatch({ type: "session/anonymous", error: safeMessage(error) });
 
         return;
       }
@@ -205,7 +219,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     async function signIn(credentials: Credentials): Promise<void> {
-      const id = ++guards.current.session;
+      const id = invalidateSession();
 
       dispatch({ type: "session/checking" });
 
@@ -246,10 +260,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     function signOut(): void {
-      guards.current.session += 1;
-      guards.current.usage += 1;
-      guards.current.keys += 1;
-      guards.current.summary += 1;
+      invalidateSession();
 
       try {
         clearToken();
@@ -261,57 +272,90 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     async function createKey(): Promise<void> {
-      if (stateRef.current.create.pending) {
+      if (mutationInFlight.current === guards.current.session) {
         return;
       }
 
       const { scopes } = stateRef.current.ui.createDraft;
+      if (scopes.length === 0) {
+        dispatch({ type: "create/error", error: "Select at least one scope." });
+        return;
+      }
+
+      const session = guards.current.session;
+      const modal = modalGeneration.current;
+      const authToken = token();
+      mutationInFlight.current = session;
 
       dispatch({ type: "create/pending" });
       dispatch({ type: "keys/mutating", mutating: true });
 
       try {
-        const created = await apiCreateKey(token(), scopes);
-        dispatch({ type: "create/success", secret: created.secret });
-        // Re-pull so the new key appears and the summary counts update.
-        await Promise.all([loadKeys(stateRef.current.keys.pagination), loadSummary()]);
+        const created = await apiCreateKey(authToken, scopes);
+        if (guards.current.session !== session) return;
+
+        if (modalGeneration.current === modal) {
+          dispatch({ type: "create/success", secret: created.secret });
+        }
+        // A closed modal forfeits the secret, but the same session still needs fresh metadata.
+        await Promise.all([loadKeys(stateRef.current.keys.pagination, authToken), loadSummary(authToken)]);
       } catch (error) {
+        if (guards.current.session !== session) return;
         if (isAuthFailure(error)) {
           signOut();
           return;
         }
-        dispatch({ type: "create/error", error: safeMessage(error) });
+        if (modalGeneration.current === modal) {
+          dispatch({ type: "create/error", error: safeMessage(error) });
+        }
       } finally {
-        dispatch({ type: "keys/mutating", mutating: false });
+        if (mutationInFlight.current === session) mutationInFlight.current = null;
+        if (guards.current.session === session) {
+          dispatch({ type: "keys/mutating", mutating: false });
+        }
       }
     }
 
     async function revokeKey(id: string): Promise<void> {
-      if (stateRef.current.keys.mutating) {
+      if (mutationInFlight.current === guards.current.session) {
         return;
       }
 
       const target = stateRef.current.ui.revokeTarget;
+      const session = guards.current.session;
+      const modal = modalGeneration.current;
+      const authToken = token();
+      mutationInFlight.current = session;
 
       dispatch({ type: "keys/mutating", mutating: true });
       try {
-        await apiRevokeKey(token(), id);
+        await apiRevokeKey(authToken, id);
+        if (guards.current.session !== session) return;
 
-        dispatch({ type: "ui/closeModal" });
-        dispatch({ type: "ui/setToast", toast: `API key ${target ? `${target.prefix} ` : ""}revoked.` });
+        if (modalGeneration.current === modal) {
+          modalGeneration.current += 1;
+          dispatch({ type: "ui/closeModal" });
+          dispatch({ type: "ui/setToast", toast: `API key ${target ? `${target.prefix} ` : ""}revoked.` });
+        }
 
         // Re-pull so the row flips to revoked and the summary counts update.
-        await Promise.all([loadKeys(stateRef.current.keys.pagination), loadSummary()]);
+        await Promise.all([loadKeys(stateRef.current.keys.pagination, authToken), loadSummary(authToken)]);
       } catch (error) {
+        if (guards.current.session !== session) return;
         if (isAuthFailure(error)) {
           signOut();
           return;
         }
 
-        // Keep the dialog open and report via the toast; the user can retry.
-        dispatch({ type: "ui/setToast", toast: safeMessage(error) });
+        // Only the originating dialog may receive this request's error.
+        if (modalGeneration.current === modal) {
+          dispatch({ type: "ui/setToast", toast: safeMessage(error) });
+        }
       } finally {
-        dispatch({ type: "keys/mutating", mutating: false });
+        if (mutationInFlight.current === session) mutationInFlight.current = null;
+        if (guards.current.session === session) {
+          dispatch({ type: "keys/mutating", mutating: false });
+        }
       }
     }
 
@@ -319,10 +363,23 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       restoreSession,
       signIn,
       signOut,
-      setView: (view) => dispatch({ type: "ui/setView", view }),
-      openCreate: () => dispatch({ type: "ui/openCreate" }),
-      openRevoke: (key) => dispatch({ type: "ui/openRevoke", key }),
-      closeModal: () => dispatch({ type: "ui/closeModal" }),
+      setView: (view) => {
+        modalGeneration.current += 1;
+        dispatch({ type: "ui/setView", view });
+      },
+      openCreate: () => {
+        modalGeneration.current += 1;
+        dispatch({ type: "ui/openCreate" });
+      },
+      openRevoke: (key) => {
+        modalGeneration.current += 1;
+        dispatch({ type: "ui/dismissToast" });
+        dispatch({ type: "ui/openRevoke", key });
+      },
+      closeModal: () => {
+        modalGeneration.current += 1;
+        dispatch({ type: "ui/closeModal" });
+      },
       toggleCreateScope: (scope) => dispatch({ type: "ui/toggleCreateScope", scope }),
       loadUsage,
       loadKeys,
@@ -330,7 +387,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       loadSummary,
       createKey,
       revokeKey,
-      dismissSecret: () => dispatch({ type: "create/dismissSecret" }),
+      dismissSecret: () => {
+        modalGeneration.current += 1;
+        dispatch({ type: "create/dismissSecret" });
+      },
       dismissToast: () => dispatch({ type: "ui/dismissToast" }),
     };
   }, []);
@@ -347,6 +407,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     return () => {
       guards.current.session += 1;
+      guards.current.usage += 1;
+      guards.current.keys += 1;
+      guards.current.summary += 1;
+      modalGeneration.current += 1;
       window.removeEventListener("pageshow", resume);
     };
   }, [actions]);
