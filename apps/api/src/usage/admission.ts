@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { type ApiKeyIdentity, hashApiKey } from "../api-keys/index.js";
 import type { Database } from "../db/client.js";
 import { apiKeys } from "../db/schema.js";
+import { RATE_LIMIT_MAX } from "../limits.js";
 import { type AccountingClock, controlTransaction, databaseTime } from "./transactions.js";
 
 export type Admission =
@@ -68,7 +69,7 @@ async function admitOnce(
           WHERE a > ${instant}::timestamptz - interval '60 seconds') AS admissions
         FROM api_keys WHERE id = ${key.id}::uuid
       ), decision AS (
-        SELECT admissions, CASE WHEN cardinality(admissions) < 60 THEN 0 ELSE
+        SELECT admissions, CASE WHEN cardinality(admissions) < ${RATE_LIMIT_MAX} THEN 0 ELSE
           greatest(1, ceil(extract(epoch FROM (
             (SELECT min(a) FROM unnest(admissions) a) + interval '60 seconds' - ${instant}::timestamptz
           ))))::integer END AS retry_after FROM retained

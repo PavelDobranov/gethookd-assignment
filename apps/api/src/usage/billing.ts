@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 
 import type { ApiKeyIdentity } from "../api-keys/index.js";
 import type { Database } from "../db/client.js";
+import { MONTHLY_QUOTA } from "../limits.js";
 import { type AccountingClock, controlTransaction, databaseTime } from "./transactions.js";
 
 type BillingIdentity = Pick<ApiKeyIdentity, "id" | "userId">;
@@ -46,8 +47,8 @@ export function readUsage(db: Database, ownerId: string, clock: AccountingClock 
         period_start: `${row.period_start}T00:00:00.000Z`,
         period_end: `${row.period_end}T00:00:00.000Z`,
         billable_calls: row.count,
-        quota: 1000,
-        remaining: 1000 - row.count,
+        quota: MONTHLY_QUOTA,
+        remaining: MONTHLY_QUOTA - row.count,
       },
     };
   });
@@ -98,7 +99,7 @@ export function settleBilling(
       INSERT INTO monthly_usage (owner_id, period_start, count)
       VALUES (${identity.userId}::uuid, ${utcPeriod(instant)}, 1)
       ON CONFLICT (owner_id, period_start) DO UPDATE SET count = monthly_usage.count + 1
-      WHERE monthly_usage.count < 1000 RETURNING count
+      WHERE monthly_usage.count < ${MONTHLY_QUOTA} RETURNING count
     `);
     if (charged.rows.length === 0) {
       const {

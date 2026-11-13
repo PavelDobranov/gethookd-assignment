@@ -51,7 +51,7 @@ describe("shared rich HTTP errors", () => {
     expect(await quota.json()).toEqual({
       error: {
         code: "QUOTA_EXCEEDED",
-        message: expect.stringContaining(reset),
+        message: `The 1,000-call monthly quota is exhausted; it resets at ${reset}.`,
         next_action: expect.any(String),
         retryable: false,
         details: [{ parameter: "quota", reason: "monthly_quota_exceeded", allowed_values: [], suggestion: reset }],

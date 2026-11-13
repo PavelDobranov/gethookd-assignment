@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { type Ad, adFormats, adStatuses, niches } from "../ads/index.js";
+import { MONTHLY_QUOTA, RATE_LIMIT_MAX } from "../limits.js";
 
 // Operational insertion provenance, not part of the public ad domain. Keep xid8
 // as text: PostgreSQL transaction IDs must never pass through JS numbers.
@@ -104,7 +105,10 @@ export const apiKeys = pgTable(
       .default(sql`'{}'::timestamptz[]`),
   },
   (table) => [
-    check("api_keys_rate_admissions_check", sql`cardinality(${table.rateAdmissions}) <= 60`),
+    check(
+      "api_keys_rate_admissions_check",
+      sql`cardinality(${table.rateAdmissions}) <= ${RATE_LIMIT_MAX}`.inlineParams(),
+    ),
     check(
       "api_keys_scopes_check",
       sql`${table.scopes} = ARRAY['search:read']::text[] OR ${table.scopes} = ARRAY['keys:manage']::text[] OR ${table.scopes} = ARRAY['search:read', 'keys:manage']::text[]`,
@@ -124,7 +128,7 @@ export const monthlyUsage = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.ownerId, table.periodStart] }),
-    check("monthly_usage_count_check", sql`${table.count} BETWEEN 0 AND 1000`),
+    check("monthly_usage_count_check", sql`${table.count} BETWEEN 0 AND ${MONTHLY_QUOTA}`.inlineParams()),
   ],
 );
 

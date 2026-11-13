@@ -1,5 +1,7 @@
 import type { ErrorRequestHandler, Response } from "express";
 
+import { MONTHLY_QUOTA } from "../limits.js";
+
 export type ValidationDetail = {
   parameter: string;
   reason: string;
@@ -84,7 +86,7 @@ export function sendQuotaExceeded(res: Response, resetAt: string) {
     "QUOTA_EXCEEDED",
     {
       status: 403,
-      message: `The 1,000-call monthly quota is exhausted; it resets at ${resetAt}.`,
+      message: `The ${MONTHLY_QUOTA.toLocaleString("en-US")}-call monthly quota is exhausted; it resets at ${resetAt}.`,
       next_action: "Wait for the reset; free operations and matching billed retries remain available.",
     },
     [{ parameter: "quota", reason: "monthly_quota_exceeded", allowed_values: [], suggestion: resetAt }],
