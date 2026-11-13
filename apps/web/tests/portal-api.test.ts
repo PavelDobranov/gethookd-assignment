@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { createKey, getUsage, type KeyMetadata, listKeys, revokeKey, summarizeKeys } from "./portal-api";
+import { createKey, getUsage, type KeyMetadata, listKeys, revokeKey, summarizeKeys } from "../src/portal-api";
 
 const token = "header.payload.signature";
 const id = "06a9d160-b0b4-4e51-9809-f244d57e361e";

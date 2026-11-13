@@ -2,18 +2,18 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import App from "./app";
-import * as auth from "./auth";
-import * as api from "./portal-api";
-import { type CreatedKey, type KeyMetadata, PortalError } from "./portal-api";
+import App from "../src/app";
+import * as auth from "../src/auth";
+import * as api from "../src/portal-api";
+import { type CreatedKey, type KeyMetadata, PortalError } from "../src/portal-api";
 
-vi.mock("./auth", async (original) => ({
+vi.mock("../src/auth", async (original) => ({
   ...(await original<typeof auth>()),
   readToken: vi.fn(),
   getIdentity: vi.fn(),
   clearToken: vi.fn(),
 }));
-vi.mock("./portal-api", async (original) => ({
+vi.mock("../src/portal-api", async (original) => ({
   ...(await original<typeof api>()),
   listKeys: vi.fn(),
   summarizeKeys: vi.fn(),

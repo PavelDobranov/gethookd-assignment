@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearToken, getIdentity, login, readToken, storeToken, TOKEN_STORAGE_KEY } from "./auth";
+import { clearToken, getIdentity, login, readToken, storeToken, TOKEN_STORAGE_KEY } from "../src/auth";
 
 const token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature";
 

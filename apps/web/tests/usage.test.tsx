@@ -2,23 +2,23 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import App from "./app";
-import * as auth from "./auth";
-import { getUsage, listKeys, type OwnerUsage, PortalError, summarizeKeys } from "./portal-api";
-import { useAppActions, useAppState } from "./state/context";
-import { PortalProvider } from "./state/portal-provider";
-import { UsageView } from "./usage";
+import App from "../src/app";
+import * as auth from "../src/auth";
+import { getUsage, listKeys, type OwnerUsage, PortalError, summarizeKeys } from "../src/portal-api";
+import { useAppActions, useAppState } from "../src/state/context";
+import { PortalProvider } from "../src/state/portal-provider";
+import { UsageView } from "../src/usage";
 
-vi.mock("./auth", async (original) => ({
-  ...(await original<typeof import("./auth")>()),
+vi.mock("../src/auth", async (original) => ({
+  ...(await original<typeof import("../src/auth")>()),
   readToken: vi.fn(),
   getIdentity: vi.fn(),
   login: vi.fn(),
   storeToken: vi.fn(),
   clearToken: vi.fn(),
 }));
-vi.mock("./portal-api", async (original) => ({
-  ...(await original<typeof import("./portal-api")>()),
+vi.mock("../src/portal-api", async (original) => ({
+  ...(await original<typeof import("../src/portal-api")>()),
   getUsage: vi.fn(),
   listKeys: vi.fn(),
   summarizeKeys: vi.fn(),

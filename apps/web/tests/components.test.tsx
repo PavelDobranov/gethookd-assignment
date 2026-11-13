@@ -2,20 +2,20 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { KeyMetadata } from "../portal-api";
-import { Badge } from "./badge";
-import { Button } from "./button";
-import { Card } from "./card";
-import { CodeBlock } from "./code-block";
-import { EmptyState } from "./empty-state";
-import { FieldError } from "./field-error";
-import { KeyTable } from "./key-table";
-import { Modal } from "./modal";
-import { ProgressBar } from "./progress-bar";
-import { SecretReveal } from "./secret-reveal";
-import { Sidebar } from "./sidebar";
-import { Stat, StatGrid } from "./stat-grid";
-import { Toast } from "./toast";
+import { Badge } from "../src/components/badge";
+import { Button } from "../src/components/button";
+import { Card } from "../src/components/card";
+import { CodeBlock } from "../src/components/code-block";
+import { EmptyState } from "../src/components/empty-state";
+import { FieldError } from "../src/components/field-error";
+import { KeyTable } from "../src/components/key-table";
+import { Modal } from "../src/components/modal";
+import { ProgressBar } from "../src/components/progress-bar";
+import { SecretReveal } from "../src/components/secret-reveal";
+import { Sidebar } from "../src/components/sidebar";
+import { Stat, StatGrid } from "../src/components/stat-grid";
+import { Toast } from "../src/components/toast";
+import type { KeyMetadata } from "../src/portal-api";
 
 afterEach(cleanup);
 

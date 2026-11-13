@@ -2,12 +2,20 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import App from "./app";
-import { TOKEN_STORAGE_KEY } from "./auth";
-import { createKey, getUsage, type KeyMetadata, listKeys, PortalError, revokeKey, summarizeKeys } from "./portal-api";
+import App from "../src/app";
+import { TOKEN_STORAGE_KEY } from "../src/auth";
+import {
+  createKey,
+  getUsage,
+  type KeyMetadata,
+  listKeys,
+  PortalError,
+  revokeKey,
+  summarizeKeys,
+} from "../src/portal-api";
 
-vi.mock("./portal-api", async (original) => ({
-  ...(await original<typeof import("./portal-api")>()),
+vi.mock("../src/portal-api", async (original) => ({
+  ...(await original<typeof import("../src/portal-api")>()),
   listKeys: vi.fn(),
   // summarizeKeys closes over the real listKeys, not the mocked module export.
   summarizeKeys: vi.fn(),

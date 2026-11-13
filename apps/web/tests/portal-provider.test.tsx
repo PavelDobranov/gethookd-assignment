@@ -2,13 +2,13 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import * as auth from "../auth";
-import type { CreatedKey, KeyList, KeyMetadata, OwnerUsage } from "../portal-api";
-import * as api from "../portal-api";
-import { useAppActions, useAppState } from "./context";
-import { PortalProvider } from "./portal-provider";
+import * as auth from "../src/auth";
+import type { CreatedKey, KeyList, KeyMetadata, OwnerUsage } from "../src/portal-api";
+import * as api from "../src/portal-api";
+import { useAppActions, useAppState } from "../src/state/context";
+import { PortalProvider } from "../src/state/portal-provider";
 
-vi.mock("../auth", async (original) => ({
+vi.mock("../src/auth", async (original) => ({
   ...(await original<typeof auth>()),
   readToken: vi.fn(),
   getIdentity: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock("../auth", async (original) => ({
   storeToken: vi.fn(),
   clearToken: vi.fn(),
 }));
-vi.mock("../portal-api", async (original) => ({
+vi.mock("../src/portal-api", async (original) => ({
   ...(await original<typeof api>()),
   getUsage: vi.fn(),
   listKeys: vi.fn(),

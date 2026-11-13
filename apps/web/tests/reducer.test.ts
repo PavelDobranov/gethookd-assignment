@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { KeyList, KeyMetadata } from "../portal-api";
-import { appReducer } from "./reducer";
-import type { AppState } from "./types";
-import { initialState } from "./types";
+import type { KeyList, KeyMetadata } from "../src/portal-api";
+import { appReducer } from "../src/state/reducer";
+import type { AppState } from "../src/state/types";
+import { initialState } from "../src/state/types";
 
 const user = { id: "u1", username: "demo" };
 
