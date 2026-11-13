@@ -1,15 +1,16 @@
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
-import type { Server } from "node:http";
+import { request as httpRequest, type Server } from "node:http";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
 import { parse } from "yaml";
 
 import { niches } from "../src/ads/model.js";
 import { hashApiKey } from "../src/api-keys/index.js";
 import { createApp } from "../src/app.js";
+import { signToken } from "../src/auth/jwt.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
@@ -24,17 +25,27 @@ type Parameter = {
   explode?: boolean;
   schema: Schema;
 };
+type Method = "get" | "post" | "delete";
+type ParameterReference = Parameter | { $ref: string };
 type Operation = {
-  parameters?: Parameter[];
+  parameters?: ParameterReference[];
+  requestBody?: { content: { "application/json": { schema: Schema } } };
   responses: Record<string, { $ref?: string; content?: { "application/json": { schema: Schema } } }>;
 };
 type Contract = {
   openapi: string;
   security: { BearerApiKey: never[] }[];
-  paths: Record<string, { get: Operation }>;
+  paths: Record<string, Record<Method, Operation>>;
   components: {
+    parameters: Record<string, Parameter>;
     schemas: Record<string, Schema>;
-    responses: Record<string, { content: { "application/json": { schema: Schema } } }>;
+    responses: Record<
+      string,
+      {
+        headers?: Record<string, { schema: Schema }>;
+        content: { "application/json": { schema: Schema } };
+      }
+    >;
     securitySchemes: Record<string, Schema>;
   };
 };
@@ -49,14 +60,14 @@ function validators(document: Contract) {
     ajv.addSchema(schema, `#/components/schemas/${name}`);
   }
   return {
-    response(path: string, status: number) {
-      const response = document.paths[path].get.responses[String(status)];
-      if (!response) throw new Error(`Undocumented GET ${path} status ${status}`);
+    response(path: string, status: number, method: Method = "get") {
+      const response = document.paths[path][method].responses[String(status)];
+      if (!response) throw new Error(`Undocumented ${method.toUpperCase()} ${path} status ${status}`);
       const resolved = response.$ref
         ? document.components.responses[response.$ref.replace("#/components/responses/", "")]
         : response;
       const schema = resolved.content?.["application/json"].schema;
-      if (!schema) throw new Error(`Missing JSON schema for GET ${path} status ${status}`);
+      if (!schema) throw new Error(`Missing JSON schema for ${method.toUpperCase()} ${path} status ${status}`);
       return ajv.compile(schema);
     },
     parameter(parameter: Parameter) {
@@ -67,10 +78,29 @@ function validators(document: Contract) {
 
 const validate = validators(contract);
 const paths = ["/api/v1/ads", "/api/v1/ads/{id}", "/api/v1/niches"];
+const management = [
+  ["/api/v1/keys", "get"],
+  ["/api/v1/keys", "post"],
+  ["/api/v1/keys/{id}", "delete"],
+  ["/api/v1/usage", "get"],
+] as const;
+const jwtSecret = "public-v1-openapi-jwt-secret-32-bytes";
+
+function queryParameters() {
+  return (contract.paths["/api/v1/ads"].get.parameters ?? [])
+    .map((parameter) =>
+      "$ref" in parameter
+        ? contract.components.parameters[parameter.$ref.replace("#/components/parameters/", "")]
+        : parameter,
+    )
+    .filter((parameter) => parameter.in === "query");
+}
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v1_openapi_test";
 const connection = createDatabase(url.href);
 let key: string;
+let ownerId: string;
+let keyId: string;
 let caseNumber = 0;
 const brandId = 94001;
 let server: Server;
@@ -109,7 +139,7 @@ beforeAll(async () => {
     { ...base, id: "D", status: "inactive", endDate: "2026-01-04", startDate: "2026-01-01" },
     { ...base, id: "opaque /é", brandId: brandId + 1, niche: "fitness", headline: "Unrelated" },
   ]);
-  server = createApp({ db: connection.db, jwtSecret: "public-v1-openapi-jwt-secret-32-bytes" }).listen(0, "127.0.0.1");
+  server = createApp({ db: connection.db, jwtSecret }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Expected TCP listener");
@@ -126,7 +156,12 @@ beforeEach(async () => {
       passwordHash: "unused-rest-fixture-hash",
     })
     .returning({ id: users.id });
-  await connection.db.insert(apiKeys).values(apiKeyFixture(owner.id, hashApiKey(key), key.slice(0, 12)));
+  ownerId = owner.id;
+  const [created] = await connection.db
+    .insert(apiKeys)
+    .values(apiKeyFixture(owner.id, hashApiKey(key), key.slice(0, 12)))
+    .returning({ id: apiKeys.id });
+  keyId = created.id;
 });
 
 afterAll(async () => {
@@ -135,16 +170,44 @@ afterAll(async () => {
   await connection.close();
 });
 
-async function request(path: string, operation: string, status = 200, authorization: string | null = `Bearer ${key}`) {
+async function request(
+  path: string,
+  operation: string,
+  status = 200,
+  authorization: string | null = `Bearer ${key}`,
+  options: RequestInit = {},
+  method: Method = "get",
+) {
   const response = await fetch(`${origin}${path}`, {
-    headers: authorization === null ? {} : { Authorization: authorization },
+    ...options,
+    method: method.toUpperCase(),
+    headers: { ...(authorization === null ? {} : { Authorization: authorization }), ...options.headers },
   });
   expect(response.status).toBe(status);
   expect(response.headers.get("cache-control")).toBe("no-store");
+  if (status === 204) {
+    expect(contract.paths[operation][method].responses["204"]).toBeDefined();
+    expect(response.headers.get("content-type")).toBeNull();
+    expect(await response.text()).toBe("");
+    return null;
+  }
+  if (status === 429) {
+    const wait = response.headers.get("retry-after");
+    expect(wait).toMatch(/^[1-9][0-9]*$/);
+    const header = contract.components.responses.RateLimited.headers?.["Retry-After"];
+    if (!header) throw new Error("Missing Retry-After schema");
+    expect(validate.parameter({ name: "Retry-After", in: "header", schema: header.schema })(Number(wait))).toBe(true);
+  }
   expect(response.headers.get("content-type")).toContain("application/json");
   const body: unknown = await response.json();
-  const accepts = validate.response(operation, response.status);
+  const accepts = validate.response(operation, response.status, method);
   expect(accepts(body), JSON.stringify(accepts.errors)).toBe(true);
+  if (status === 429) {
+    const error = body as { error: { message: string; next_action: string } };
+    const wait = response.headers.get("retry-after");
+    expect(error.error.message).toContain(`${wait} seconds`);
+    expect(error.error.next_action).toContain(`${wait} seconds`);
+  }
   return body;
 }
 
@@ -169,7 +232,9 @@ it("validates actual populated search, nullable detail and catalog HTTP response
     data: { end_date: "2026-01-04", impression_rank: null },
   });
   await request(`/api/v1/ads/${encodeURIComponent("opaque /é")}`, "/api/v1/ads/{id}");
-  const catalog = await request("/api/v1/niches", "/api/v1/niches");
+  const catalog = await request("/api/v1/niches", "/api/v1/niches", 200, `Bearer ${key}`, {
+    headers: { "Idempotency-Key": "ignored invalid value!" },
+  });
   expect(catalog).toEqual({ data: niches.map(({ slug, name }) => ({ slug, name })) });
   expect(contract.components.schemas.NicheSlug.enum).toEqual(niches.map(({ slug }) => slug));
 });
@@ -189,7 +254,7 @@ it.each([
 });
 
 it("validates empty/default echoes and both sorts through final/null cursors", async () => {
-  const parameters = contract.paths["/api/v1/ads"].get.parameters ?? [];
+  const parameters = queryParameters();
   const defaults = Object.fromEntries(parameters.map(({ name, schema }) => [name, schema.default]));
   const empty = await search("brand_id=2147483647");
   expect(empty).toMatchObject({
@@ -305,7 +370,7 @@ it.each<[string, string, unknown, boolean]>([
   ["cursor", "!", "!", false],
   ["cursor", "x".repeat(4097), "x".repeat(4097), false],
 ])("agrees on documented %s request constraints", async (name, wire, normalized, valid) => {
-  const parameter = contract.paths["/api/v1/ads"].get.parameters?.find((entry) => entry.name === name);
+  const parameter = queryParameters().find((entry) => entry.name === name);
   if (!parameter) throw new Error(`Missing documented parameter ${name}`);
   expect(validate.parameter(parameter)(normalized)).toBe(valid);
   const query = new URLSearchParams({ [name]: wire });
@@ -320,7 +385,7 @@ it.each<[string, string, unknown, boolean]>([
 });
 
 it("pins repeated-niche serialization, scalar uniqueness, exact names and the cross-field brand rule", async () => {
-  const parameters = contract.paths["/api/v1/ads"].get.parameters ?? [];
+  const parameters = queryParameters();
   expect(parameters.map(({ name }) => name)).toEqual([
     "q",
     "niche",
@@ -360,7 +425,7 @@ it("validates genuine continuation tokens, query mismatch, tampering and the exa
   const first = await search("limit=1");
   const token = first.next_cursor;
   if (token === null) throw new Error("Expected a continuation cursor");
-  const cursorParameter = contract.paths["/api/v1/ads"].get.parameters?.find(({ name }) => name === "cursor");
+  const cursorParameter = queryParameters().find(({ name }) => name === "cursor");
   if (!cursorParameter) throw new Error("Missing cursor schema");
   expect(validate.parameter(cursorParameter)(token)).toBe(true);
   await search(`cursor=${token}&limit=2`);
@@ -432,15 +497,353 @@ it("rejects extra public fields, missing fields, invalid formats and broken null
   expect(accepts(missing)).toBe(false);
 });
 
+type KeyMetadata = {
+  id: string;
+  prefix: string;
+  scopes: string[];
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+type KeyCreated = { data: KeyMetadata; secret: string };
+type KeyList = { data: KeyMetadata[]; limit: number; offset: number; has_more: boolean };
+
+async function manage(path: string, method: Method, status: number, body?: string, credential = key) {
+  const operation = path.split("?")[0].startsWith("/keys/") ? "/api/v1/keys/{id}" : `/api/v1${path.split("?")[0]}`;
+  const result = await request(
+    `/api/v1${path}`,
+    operation,
+    status,
+    `Bearer ${credential}`,
+    {
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "ignored invalid value!" },
+      ...(body === undefined ? {} : { body }),
+    },
+    method,
+  );
+  if (status === 422) expect(result).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+  return result;
+}
+
+it("validates reveal-once creation, canonical scopes, paginated metadata and exact shared usage", async () => {
+  const created: KeyCreated[] = [];
+  for (const scopes of [["search:read"], ["keys:manage"], ["keys:manage", "search:read"]]) {
+    const input = { scopes };
+    const schema = contract.paths["/api/v1/keys"].post.requestBody?.content["application/json"].schema;
+    if (!schema) throw new Error("Missing creation input schema");
+    expect(validate.parameter({ name: "body", in: "body", schema })(input)).toBe(true);
+    const result = (await manage("/keys", "post", 201, JSON.stringify(input))) as KeyCreated;
+    expect(result.data).toMatchObject({
+      prefix: result.secret.slice(0, 12),
+      scopes: scopes.length === 2 ? ["search:read", "keys:manage"] : scopes,
+      last_used_at: null,
+      revoked_at: null,
+    });
+    created.push(result);
+  }
+  // Same ignored header did not turn three POSTs into one operation.
+  expect(new Set(created.map(({ secret }) => secret)).size).toBe(3);
+  const all = (await manage("/keys", "get", 200)) as KeyList;
+  expect(all).toMatchObject({ limit: 20, offset: 0, has_more: false });
+  expect(all.data).toHaveLength(4);
+  const serialized = JSON.stringify(all);
+  for (const { secret } of created) {
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(hashApiKey(secret));
+  }
+  expect(all.data.find(({ id }) => id === keyId)?.last_used_at).toEqual(expect.any(String));
+  // Only the authenticating row may advance between reads; all other metadata
+  // stays exact. Assert monotonic authentication times before normalizing that field.
+  let lastUsed = Number.NEGATIVE_INFINITY;
+  function snapshot(list: KeyList): KeyList {
+    const caller = list.data.find(({ id }) => id === keyId);
+    if (caller) {
+      if (caller.last_used_at === null) throw new Error("Authenticated caller must have last_used_at");
+      const observed = Date.parse(caller.last_used_at);
+      expect(observed).toBeGreaterThanOrEqual(lastUsed);
+      lastUsed = observed;
+    }
+    return { ...list, data: list.data.map((entry) => (entry.id === keyId ? { ...entry, last_used_at: null } : entry)) };
+  }
+  const expected = snapshot(all);
+  const first = (await manage("/keys?limit=02&offset=00", "get", 200)) as KeyList;
+  const last = (await manage("/keys?limit=2&offset=2", "get", 200)) as KeyList;
+  expect(snapshot(first)).toEqual({ data: expected.data.slice(0, 2), limit: 2, offset: 0, has_more: true });
+  expect(snapshot(last)).toEqual({ data: expected.data.slice(2), limit: 2, offset: 2, has_more: false });
+  expect(await manage("/keys?limit=100&offset=99", "get", 200)).toEqual({
+    data: [],
+    limit: 100,
+    offset: 99,
+    has_more: false,
+  });
+  await search("q=missing");
+  const usage = (await manage("/usage", "get", 200)) as { data: Record<string, unknown> };
+  expect(usage.data).toMatchObject({ billable_calls: 1, quota: 1000, remaining: 999 });
+  expect(usage.data.period_start).toEqual(expect.stringMatching(/^\d{4}-\d{2}-01T00:00:00\.000Z$/));
+  expect(usage.data.period_end).toEqual(expect.stringMatching(/^\d{4}-\d{2}-01T00:00:00\.000Z$/));
+  await manage(`/keys/${created[0].data.id}`, "delete", 204);
+  const revoked = (await manage("/keys", "get", 200)) as KeyList;
+  expect(revoked.data.find(({ id }) => id === created[0].data.id)?.revoked_at).toEqual(expect.any(String));
+  const revokedSnapshot = snapshot(revoked);
+  await manage(`/keys/${created[0].data.id}`, "delete", 204);
+  expect(snapshot((await manage("/keys", "get", 200)) as KeyList)).toEqual(revokedSnapshot);
+});
+
+it.each(management)(
+  "validates management %s %s authentication, scope, rate, route and server errors",
+  async (operation, method) => {
+    const path = operation.replace("{id}", "00000000-0000-0000-0000-000000000000");
+    const options =
+      method === "post" ? { headers: { "Content-Type": "application/json" }, body: '{"scopes":["keys:manage"]}' } : {};
+    for (const auth of [null, "Bearer invalid", `Bearer ${await signToken(ownerId, jwtSecret)}`]) {
+      await request(path, operation, 401, auth, options, method);
+    }
+    await connection.db
+      .update(apiKeys)
+      .set({ scopes: ["search:read"] })
+      .where(eq(apiKeys.id, keyId));
+    expect(await request(path, operation, 403, `Bearer ${key}`, options, method)).toMatchObject({
+      error: { code: "INSUFFICIENT_SCOPE" },
+    });
+    await connection.db.execute(
+      sql`UPDATE api_keys SET rate_admissions = array_fill(clock_timestamp(), ARRAY[60]) WHERE id = ${keyId}::uuid`,
+    );
+    await request(`${path}?unknown=x`, operation, 429, `Bearer ${key}`, options, method);
+    await connection.db
+      .update(apiKeys)
+      .set({ scopes: ["search:read", "keys:manage"], rateAdmissions: [] })
+      .where(eq(apiKeys.id, keyId));
+    await request("/api/v1/unknown", operation, 404, `Bearer ${key}`, {}, method);
+    const spy = vi
+      .spyOn(connection.db.$client, "connect")
+      .mockRejectedValueOnce(new Error("private contract sentinel"));
+    try {
+      const body = await request(path, operation, 500, `Bearer ${key}`, options, method);
+      expect(JSON.stringify(body)).not.toContain("private contract sentinel");
+    } finally {
+      spy.mockRestore();
+    }
+  },
+);
+
+it.each([
+  "null",
+  "[]",
+  "1",
+  '"text"',
+  "{}",
+  '{"scopes":[]}',
+  '{"scopes":"search:read"}',
+  '{"scopes":[null]}',
+  '{"scopes":["unknown"]}',
+  '{"scopes":["search:read","search:read"]}',
+  '{"scopes":["search:read"],"owner_id":"foreign"}',
+])("rejects undocumented creation body %s in the schema and HTTP", async (body) => {
+  const schema = contract.paths["/api/v1/keys"].post.requestBody?.content["application/json"].schema;
+  if (!schema) throw new Error("Missing creation schema");
+  expect(validate.parameter({ name: "body", in: "body", schema })(JSON.parse(body))).toBe(false);
+  await manage("/keys", "post", 422, body);
+});
+
+it("validates JSON 400/413 and delegation 403 separately from invalid scope 422", async () => {
+  expect(await manage("/keys", "post", 400, "{")).toMatchObject({ error: { code: "MALFORMED_JSON" } });
+  expect(await manage("/keys", "post", 413, JSON.stringify({ scopes: ["x".repeat(17000)] }))).toMatchObject({
+    error: { code: "BODY_TOO_LARGE" },
+  });
+  await connection.db
+    .update(apiKeys)
+    .set({ scopes: ["keys:manage"] })
+    .where(eq(apiKeys.id, keyId));
+  expect(await manage("/keys", "post", 403, '{"scopes":["search:read"]}')).toMatchObject({
+    error: { code: "INSUFFICIENT_SCOPE" },
+  });
+  await manage("/keys", "post", 422, '{"scopes":["unknown"]}');
+});
+
+it.each([
+  "limit=0",
+  "limit=101",
+  "limit=-1",
+  "limit=1.5",
+  "limit=1e1",
+  "limit=",
+  "limit=1&limit=2",
+  "offset=-1",
+  "offset=9007199254740992",
+  "offset=1.1",
+  "offset=%2B1",
+  "offset=",
+  "offset=1&offset=2",
+  "offset[x]=1",
+  "owner_id=other",
+  "api_key=secret",
+  "limit=2&extra=x",
+])("rejects strict key-list query %s over HTTP", async (query) => {
+  await manage(`/keys?${query}`, "get", 422);
+});
+
+it("pins management query/path allowlists, UUIDs and missing/foreign ownership privacy", async () => {
+  const listParameters = contract.paths["/api/v1/keys"].get.parameters ?? [];
+  expect(listParameters).toEqual([
+    { $ref: "#/components/parameters/KeyLimit" },
+    { $ref: "#/components/parameters/KeyOffset" },
+  ]);
+  for (const [name, values] of [
+    ["KeyLimit", [0, 101, 1.5]],
+    ["KeyOffset", [-1, 9007199254740992, 1.5]],
+  ] as const) {
+    const accepts = validate.parameter(contract.components.parameters[name]);
+    for (const value of values) expect(accepts(value)).toBe(false);
+  }
+  const uuid = validate.parameter(contract.components.parameters.KeyId);
+  expect(uuid(keyId)).toBe(true);
+  expect(uuid("not-a-uuid")).toBe(false);
+  await manage("/keys/not-a-uuid", "delete", 422);
+  await manage("/keys/%ZZ", "delete", 422);
+  for (const [path, method, body] of [
+    ["/usage?owner_id=foreign", "get"],
+    ["/keys?extra=x", "post", '{"scopes":["search:read"]}'],
+    [`/keys/${keyId}?extra=x`, "delete"],
+  ] as const) {
+    await manage(path, method, 422, body);
+  }
+  const [foreign] = await connection.db
+    .insert(users)
+    .values({ username: `${key}-foreign`, passwordHash: "unused" })
+    .returning();
+  const [target] = await connection.db
+    .insert(apiKeys)
+    .values(apiKeyFixture(foreign.id, hashApiKey(`${key}-foreign`)))
+    .returning();
+  const missing = await manage("/keys/00000000-0000-0000-0000-000000000000", "delete", 404);
+  expect(missing).toMatchObject({ error: { code: "KEY_NOT_FOUND" } });
+  expect(await manage(`/keys/${target.id}`, "delete", 404)).toEqual(missing);
+});
+
+it.each(paths)("validates scope 403 and rolling rate 429 for %s", async (operation) => {
+  const path = operation.replace("{id}", "A");
+  await connection.db
+    .update(apiKeys)
+    .set({ scopes: ["keys:manage"] })
+    .where(eq(apiKeys.id, keyId));
+  await expectError(path, operation, 403, "INSUFFICIENT_SCOPE");
+  await connection.db.execute(
+    sql`UPDATE api_keys SET rate_admissions = array_fill(clock_timestamp(), ARRAY[60]) WHERE id = ${keyId}::uuid`,
+  );
+  const body = await request(path, operation, 429);
+  expect(body).toMatchObject({ error: { code: "RATE_LIMITED", retryable: true } });
+});
+
+it.each(paths.slice(0, 2))(
+  "validates billing header syntax, 409 precedence and quota reset details for %s",
+  async (operation) => {
+    const path = operation.replace("{id}", "A");
+    const header = contract.components.parameters.IdempotencyKey;
+    expect(header).toMatchObject({ name: "Idempotency-Key", in: "header", required: false });
+    const accepts = validate.parameter(header);
+    for (const value of ["a", "A0._:-", "x".repeat(128)]) {
+      expect(accepts(value)).toBe(true);
+      await request(path, operation, 200, `Bearer ${key}`, { headers: { "iDeMpOtEnCy-KeY": value } });
+    }
+    for (const value of ["", "bad value!", "x".repeat(129)]) {
+      expect(accepts(value)).toBe(false);
+      await request(path, operation, 422, `Bearer ${key}`, { headers: { "Idempotency-Key": value } });
+    }
+    // Node's raw header array sends two physical fields; fetch would coalesce them.
+    const duplicate = await new Promise<{ status: number; body: unknown; cache: string | string[] | undefined }>(
+      (resolve, reject) => {
+        const req = httpRequest(
+          `${origin}${path}`,
+          {
+            headers: [
+              "Host",
+              new URL(origin).host,
+              "Authorization",
+              `Bearer ${key}`,
+              "Idempotency-Key",
+              "one",
+              "Idempotency-Key",
+              "two",
+            ],
+          },
+          (res) => {
+            let text = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => {
+              text += chunk;
+            });
+            res.on("end", () =>
+              resolve({ status: res.statusCode ?? 0, body: JSON.parse(text), cache: res.headers["cache-control"] }),
+            );
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      },
+    );
+    expect(duplicate.status).toBe(422);
+    expect(duplicate.cache).toBe("no-store");
+    expect(validate.response(operation, 422)(duplicate.body)).toBe(true);
+    await connection.db.execute(sql`UPDATE monthly_usage SET count = 1000 WHERE owner_id = ${ownerId}::uuid`);
+    const changed = operation.endsWith("{id}") ? "/api/v1/ads/B" : "/api/v1/ads?limit=1";
+    expect(
+      await request(changed, operation, 409, `Bearer ${key}`, { headers: { "Idempotency-Key": "a" } }),
+    ).toMatchObject({ error: { code: "IDEMPOTENCY_CONFLICT", retryable: false, details: [] } });
+    await request(path, operation, 200, `Bearer ${key}`, { headers: { "Idempotency-Key": "a" } });
+    const quota = (await request(path, operation, 403)) as {
+      error: { code: string; message: string; details: { suggestion: string }[] };
+    };
+    expect(quota.error.code).toBe("QUOTA_EXCEEDED");
+    const usage = (await manage("/usage", "get", 200)) as {
+      data: { period_end: string; billable_calls: number; remaining: number };
+    };
+    expect(quota.error.details).toEqual([
+      { parameter: "quota", reason: "monthly_quota_exceeded", allowed_values: [], suggestion: usage.data.period_end },
+    ]);
+    expect(quota.error.message).toContain(usage.data.period_end);
+    const acceptsQuota = validate.response(operation, 403);
+    expect(acceptsQuota({ error: { ...quota.error, details: [] } })).toBe(false);
+    expect(
+      acceptsQuota({ error: { ...quota.error, details: [{ ...quota.error.details[0], suggestion: "not-a-date" }] } }),
+    ).toBe(false);
+    expect(usage.data).toMatchObject({ billable_calls: 1000, remaining: 0 });
+  },
+);
+
+it("detects management output allowlist, required-field, timestamp and nullability drift", async () => {
+  const actual = (await manage("/keys", "post", 201, '{"scopes":["search:read"]}')) as KeyCreated;
+  const accepts = validate.response("/api/v1/keys", 201, "post");
+  for (const change of [
+    { secret: actual.secret },
+    { key_hash: "private" },
+    { user_id: ownerId },
+    { created_at: null },
+    { last_used_at: "invalid" },
+    { revoked_at: "2026-02-30T00:00:00Z" },
+    { scopes: [] },
+    { scopes: ["keys:manage", "search:read"] },
+  ]) {
+    expect(accepts({ ...actual, data: { ...actual.data, ...change } })).toBe(false);
+  }
+  expect(accepts({ ...actual, extra: true })).toBe(false);
+  const missing: Record<string, unknown> = { ...actual.data };
+  delete missing.last_used_at;
+  expect(accepts({ ...actual, data: missing })).toBe(false);
+  const usage = (await manage("/usage", "get", 200)) as { data: Record<string, unknown> };
+  expect(validate.response("/api/v1/usage", 200)({ data: { ...usage.data, per_key: [] } })).toBe(false);
+});
+
 it("compiles every documented response with draft-2020-12 formats and local references", () => {
   expect(contract.openapi).toMatch(/^3\.1\./);
-  expect(Object.keys(contract.paths)).toEqual(paths);
+  expect(Object.keys(contract.paths)).toEqual([...paths, "/api/v1/keys", "/api/v1/keys/{id}", "/api/v1/usage"]);
   expect(contract.security).toEqual([{ BearerApiKey: [] }]);
   expect(contract.components.securitySchemes.BearerApiKey).toEqual({ type: "http", scheme: "bearer" });
-  for (const path of paths) {
-    for (const status of Object.keys(contract.paths[path].get.responses)) {
-      expect(status).not.toBe("429");
-      expect(validate.response(path, Number(status))).toBeTypeOf("function");
+  for (const [path, operations] of Object.entries(contract.paths)) {
+    for (const [method, operation] of Object.entries(operations)) {
+      for (const status of Object.keys(operation.responses)) {
+        if (status === "204") continue;
+        expect(validate.response(path, Number(status), method as Method)).toBeTypeOf("function");
+      }
     }
   }
 });

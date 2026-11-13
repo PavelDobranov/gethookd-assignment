@@ -8,7 +8,48 @@ info:
     precedes resource validation. All v1 successes and errors use Cache-Control: no-store.
     Unknown v1 routes and unsupported methods return NOT_FOUND (404) in the same
     error envelope. Malformed path encodings return VALIDATION_ERROR (422).
-    Rate limiting and 429/Retry-After are future M4 work, not current responses.
+    Ad reads and niche discovery require search:read; key management and usage
+    require keys:manage. Scopes are stored immutable key metadata, not OAuth grants.
+    Revocation is permanent and blocks authentication after commit; in-flight calls
+    may finish. last_used_at records successful credential authentication, including
+    later scope, input, quota and rate failures; invalid/revoked credentials do not advance it.
+
+    All authenticated API-key calls (including failures, retries, unknown routes and
+    unsupported methods) share 60 admissions per key in rolling (t - 60 seconds, t].
+    Denials do not extend the window; exactly 60 seconds releases an admission.
+    JWT portal calls are outside this allowance. Retry-After is integer seconds,
+    ceil of the oldest blocking admission's remaining time, minimum 1. Guidance is
+    accurate at decision time, not a reservation against competing traffic.
+
+    Precedence is live authentication, rate admission, scope/input validation, active
+    idempotency conflict, execution and atomic billing settlement before sending 200.
+    Known conflicts win over quota exhaustion. Control-store failures fail closed.
+    Only successful v0 search, v1 search (including empty results and every cursor
+    page) and v1 detail are billable. Discovery, management, usage and failures are free.
+    The owner shares 1,000 billable calls across keys per UTC calendar month;
+    settlement time selects the start-inclusive/end-exclusive period. No scheduler
+    reset or per-key second quota exists. QUOTA_EXCEEDED is non-retryable with the
+    exact UTC reset in details[0].suggestion (parameter quota, reason
+    monthly_quota_exceeded, allowed_values []). Free operations and matching billed
+    retries remain available under normal authentication/rate/scope/input checks.
+
+    Idempotency-Key is optional on billable reads. Without it each successful call
+    charges separately. A binding is per API key and normalized method/operation and
+    effective parameters, including page size and supplied opaque cursor. Equivalent
+    ordering/defaults/normalization agree; different endpoints/versions do not.
+    Detail IDs retain exact decoded case/whitespace. Different keys have independent
+    namespaces but share owner quota. Binding starts only at successful settlement,
+    expires exactly 24 hours later and never renews on retry; failures neither charge
+    nor claim it. Concurrent identical successes charge once; differing intents cannot
+    both succeed. Matching retries execute current reads, not cached response replay,
+    and remain free after quota exhaustion/across month boundaries until expiry.
+    At expiry reuse is a new billable intent in the current month. Expired cursors
+    still fail free. Committed settlement remains billed if delivery is lost;
+    retry with the same optional value to avoid another charge. No exactly-once
+    network delivery is promised. Raw values/credentials are never reflected.
+    On discovery, management and usage the header is ignored, even if invalid;
+    it does not make creation retry-safe. v0 retains generic 400 for non-rate errors;
+    only its approved 429 exception uses the richer RATE_LIMITED envelope.
 security:
   - BearerApiKey: []
 paths:
@@ -56,6 +97,7 @@ paths:
         restore/replacement and start fresh searches. Oversize server-generated
         tokens fail safely with 500 rather than weakening the boundary.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: q
           in: query
           description: |
@@ -124,6 +166,9 @@ paths:
               schema: { $ref: '#/components/schemas/SearchResponse' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/ForbiddenRead' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '422': { $ref: '#/components/responses/SearchInvalid' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/ads/{id}:
@@ -135,6 +180,7 @@ paths:
         not an integer or seed-specific pattern. NUL/malformed encoding returns 422.
         Missing ID returns AD_NOT_FOUND. Detail is a current read, independent of cursors.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -153,13 +199,16 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/AdDetail' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ForbiddenRead' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '404': { $ref: '#/components/responses/AdNotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/niches:
     get:
       operationId: listNiches
-      summary: Discover canonical niche slugs and display names
+      summary: Discover canonical niche slugs and display names (search:read)
       description: No query parameters. Returns exactly the 12 catalog entries in catalog order, without pagination, counts or seed keywords.
       responses:
         '200':
@@ -185,10 +234,109 @@ paths:
                         slug: { $ref: '#/components/schemas/NicheSlug' }
                         name: { type: string, minLength: 1 }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/keys:
+    get:
+      operationId: listKeys
+      summary: List this owner's active and revoked key metadata (keys:manage)
+      description: Live metadata pagination, not a snapshot walk. Order created_at DESC, id ASC. No query credentials or unknown/repeated parameters.
+      parameters:
+        - $ref: '#/components/parameters/KeyLimit'
+        - $ref: '#/components/parameters/KeyOffset'
+      responses:
+        '200': { $ref: '#/components/responses/KeyList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createKey
+      summary: Create a reveal-once key (keys:manage, subset delegation only)
+      description: |
+        No query parameters. Scopes must be a subset of caller scopes; an allowed
+        scope absent from the caller yields INSUFFICIENT_SCOPE, not validation failure.
+        JSON object with exactly scopes; router-local limit 16 KB. Canonical output
+        order is search:read then keys:manage. No defaults or mutable scopes.
+        Secret has 256 random bits, only its SHA-256 hash is stored. Public prefix
+        is the first 12 characters, not unique and never an authentication credential.
+        Secret is revealed only here. If creation delivery is unknown, list/revoke
+        the orphan and create another; no automatic POST retry or recovery endpoint.
+        Idempotency-Key is ignored and never deduplicates creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateKeyInput' }
+      responses:
+        '201': { $ref: '#/components/responses/KeyCreated' }
+        '400': { $ref: '#/components/responses/MalformedJson' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/keys/{id}:
+    delete:
+      operationId: revokeKey
+      summary: Permanently revoke an owned key (keys:manage)
+      description: No query parameters. Missing/foreign IDs are indistinguishable. Repeat revocation preserves the original timestamp. Self-revocation succeeds; next authentication fails. JWT login remains recovery; no last-key safeguard.
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '204':
+          description: Revoked; empty body, no Content-Type.
+          headers:
+            Cache-Control: { schema: { const: no-store } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/KeyNotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/usage:
+    get:
+      operationId: getUsage
+      summary: Read the authoritative current UTC owner meter (keys:manage)
+      description: No query parameters. Coherent at the database read point; all owner keys share this view. Revocation never reduces historical usage. Missing history yields zero in the current period; storage failure never yields fake zero.
+      responses:
+        '200': { $ref: '#/components/responses/Usage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
 components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Exactly one optional header; case-insensitive name, case-sensitive opaque value after normal HTTP optional-whitespace parsing. Invalid/empty/duplicate values yield 422. Billing deduplication only, never response replay.
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' }
+    KeyLimit:
+      name: limit
+      in: query
+      description: Decimal digits only, leading zeros allowed, never clamped; repeated values invalid.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    KeyOffset:
+      name: offset
+      in: query
+      description: Nonnegative safe integer, decimal digits only; repeated values invalid.
+      schema: { type: integer, minimum: 0, maximum: 9007199254740991, default: 0 }
+    KeyId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   securitySchemes:
     BearerApiKey: { type: http, scheme: bearer }
   schemas:
@@ -310,7 +458,7 @@ components:
           properties:
             code:
               type: string
-              enum: [UNAUTHENTICATED, AD_NOT_FOUND, NOT_FOUND, VALIDATION_ERROR, INVALID_CURSOR, CURSOR_EXPIRED, CURSOR_QUERY_MISMATCH, INTERNAL_ERROR]
+              enum: [UNAUTHENTICATED, AD_NOT_FOUND, KEY_NOT_FOUND, NOT_FOUND, VALIDATION_ERROR, INVALID_CURSOR, CURSOR_EXPIRED, CURSOR_QUERY_MISMATCH, INTERNAL_ERROR, INSUFFICIENT_SCOPE, QUOTA_EXCEEDED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, MALFORMED_JSON, BODY_TOO_LARGE]
             message: { type: string, minLength: 1 }
             next_action: { type: string, minLength: 1 }
             retryable: { type: boolean, description: Same intended read might succeed without correcting client input; not a guarantee. }
@@ -326,6 +474,139 @@ components:
                   allowed_values: { type: array, items: { type: string } }
                   suggestion: { type: [string, 'null'] }
           description: Safe public corrections only; never credentials, cursor contents, SQL, stack traces or internal diagnostics. Details is [] when inapplicable; wording is not a machine contract.
+    Scopes:
+      type: array
+      minItems: 1
+      maxItems: 2
+      uniqueItems: true
+      items: { type: string, enum: ['search:read', 'keys:manage'] }
+    CreateKeyInput:
+      type: object
+      additionalProperties: false
+      required: [scopes]
+      properties:
+        scopes: { $ref: '#/components/schemas/Scopes' }
+    CanonicalScopes:
+      type: array
+      enum: [['search:read'], ['keys:manage'], ['search:read', 'keys:manage']]
+    KeyMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, prefix, scopes, created_at, last_used_at, revoked_at]
+      properties:
+        id: { type: string, format: uuid }
+        prefix: { type: string, minLength: 1, description: Public identification only; collisions possible. }
+        scopes: { $ref: '#/components/schemas/CanonicalScopes' }
+        created_at: { $ref: '#/components/schemas/UtcTimestamp' }
+        last_used_at:
+          anyOf:
+            - { $ref: '#/components/schemas/UtcTimestamp' }
+            - { type: 'null' }
+        revoked_at:
+          anyOf:
+            - { $ref: '#/components/schemas/UtcTimestamp' }
+            - { type: 'null' }
+    KeyCreated:
+      type: object
+      additionalProperties: false
+      required: [data, secret]
+      properties:
+        data: { $ref: '#/components/schemas/KeyMetadata' }
+        secret: { type: string, pattern: '^ghk_[A-Za-z0-9_-]{43}$' }
+    KeyList:
+      type: object
+      additionalProperties: false
+      required: [data, limit, offset, has_more]
+      properties:
+        data: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/KeyMetadata' } }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        offset: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        has_more: { type: boolean }
+    Usage:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [period_start, period_end, billable_calls, quota, remaining]
+          properties:
+            period_start: { $ref: '#/components/schemas/UtcTimestamp' }
+            period_end: { $ref: '#/components/schemas/UtcTimestamp' }
+            billable_calls: { type: integer, minimum: 0, maximum: 1000 }
+            quota: { const: 1000 }
+            remaining: { type: integer, minimum: 0, maximum: 1000 }
+    Error400:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - properties:
+            error:
+              properties:
+                code: { const: MALFORMED_JSON }
+                retryable: { const: false }
+              type: object
+          type: object
+    Error403:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { enum: [INSUFFICIENT_SCOPE, QUOTA_EXCEEDED] }
+                retryable: { const: false }
+        - type: object
+          properties:
+            error:
+              type: object
+              if:
+                properties:
+                  code: { const: QUOTA_EXCEEDED }
+              then:
+                properties:
+                  details:
+                    type: array
+                    minItems: 1
+                    maxItems: 1
+                    items:
+                      type: object
+                      properties:
+                        parameter: { const: quota }
+                        reason: { const: monthly_quota_exceeded }
+                        allowed_values: { type: array, maxItems: 0 }
+                        suggestion: { $ref: '#/components/schemas/UtcTimestamp' }
+    Error409:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: IDEMPOTENCY_CONFLICT }
+                retryable: { const: false }
+    Error413:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: BODY_TOO_LARGE }
+                retryable: { const: false }
+    Error429:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: RATE_LIMITED }
+                retryable: { const: true }
     Error401:
       allOf:
         - { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -344,7 +625,7 @@ components:
             error:
               type: object
               properties:
-                code: { enum: [NOT_FOUND, AD_NOT_FOUND] }
+                code: { enum: [NOT_FOUND, AD_NOT_FOUND, KEY_NOT_FOUND] }
                 retryable: { const: false }
     Error422:
       allOf:
@@ -367,6 +648,87 @@ components:
                 code: { const: INTERNAL_ERROR }
                 retryable: { const: true }
   responses:
+    KeyCreated:
+      description: Reveal-once creation; never automatically retry an unknown delivery outcome.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/KeyCreated' }
+    KeyList:
+      description: Owned active/revoked metadata only, never secrets, hashes or owner IDs.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/KeyList' }
+    Usage:
+      description: Current-period authoritative settled usage, including revoked keys' charges.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Usage' }
+    MalformedJson:
+      description: Malformed JSON or unsupported/corrupt JSON encoding; non-retryable.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error400' }
+    BodyTooLarge:
+      description: JSON body exceeds 16 KB; non-retryable.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error413' }
+    InsufficientScope:
+      description: Required scope absent or delegation exceeds caller scopes; retries cannot elevate privileges.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error403' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { const: INSUFFICIENT_SCOPE } } }
+    ForbiddenRead:
+      description: INSUFFICIENT_SCOPE or owner-wide QUOTA_EXCEEDED. Quota details contain parameter quota, reason monthly_quota_exceeded, empty allowed_values and suggestion equal to the UTC reset timestamp. Both are non-retryable.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error403' }
+    IdempotencyConflict:
+      description: Active per-key value bound to a different effective request; non-retryable, no prior request contents disclosed. Correct the pairing or use a new value.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error409' }
+    KeyNotFound:
+      description: Missing and foreign-owned valid UUIDs both return KEY_NOT_FOUND; unsupported routes/methods return NOT_FOUND.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error404' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { enum: [KEY_NOT_FOUND, NOT_FOUND] } } }
+    RateLimited:
+      description: Rolling per-key allowance exhausted; retryable. Message and next_action both state the same numeric wait as Retry-After. No extra top-level reset fields.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+        Retry-After: { required: true, schema: { type: integer, minimum: 1, maximum: 60 } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error429' }
     Unauthenticated:
       description: Missing, malformed or invalid Bearer API key. Supply a valid stored key, never a portal JWT or query-string credential.
       headers:
@@ -375,7 +737,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error401' }
     NotFound:
-      description: Unknown v1 route or unsupported method; use a documented GET route.
+      description: Unknown v1 route or unsupported method; use a documented route and method.
       headers:
         Cache-Control: { schema: { const: no-store } }
       content:
@@ -392,9 +754,14 @@ components:
         Cache-Control: { schema: { const: no-store } }
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error404' }
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error404' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { enum: [NOT_FOUND, AD_NOT_FOUND] } } }
     ValidationError:
-      description: Invalid query/path. Correct names/values; details contain allowed choices and deterministic advisory suggestions, never automatic corrections.
+      description: Invalid query/path/header/body. Correct names/values; details contain allowed choices and deterministic advisory suggestions, never automatic corrections.
       headers:
         Cache-Control: { schema: { const: no-store } }
       content:

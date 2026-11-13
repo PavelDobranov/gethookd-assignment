@@ -321,11 +321,15 @@ checks nor the smoke runs establish production-scale performance.
 
 ### v1 OpenAPI contract
 
-[OpenAPI 3.1](docs/openapi/v1.yaml) defines search, detail and niche discovery,
-Bearer authentication, strict inputs, response allowlists and current errors.
+[OpenAPI 3.1](docs/openapi/v1.yaml) defines search, detail, niche discovery,
+API-key management and owner usage, Bearer API-key authentication, strict inputs,
+response allowlists and current errors. The separate
+[portal contract](docs/openapi/portal.yaml) defines JWT-only key/usage operations
+using the same wire schemas, never interchangeable credentials.
 Repeated niches use `style: form` with `explode: true`, not commas or brackets.
 The impressions/brand cross-field rule and live cursor guarantees are documented
-alongside the schemas. Rate limiting/429 remains M4 work.
+alongside the schemas, optional billing idempotency, rolling rate limits,
+monthly quota/reset, error precedence and unknown creation outcomes.
 
 Run `npm run test:integration -w @gethookd/api -- tests/v1-openapi.test.ts` for
 real HTTP/PostgreSQL checks against the artifact using test-only YAML, Ajv2020 and
@@ -333,7 +337,11 @@ format validation. The suite checks populated/empty/null responses, every curren
 error code, request constraints and filter-sensitive fixtures. Drift probes reject
 incompatible required fields, enums, statuses and nested schemas; changing the
 artifact's sort enum to an unsupported value also makes the actual HTTP check fail.
-The root `npm test` includes this suite. Existing v0 and portal contracts are unchanged.
+`tests/portal-openapi.test.ts` additionally checks JWT-only operations, ownership,
+input rejection, reveal-once metadata, pagination, nullable timestamps, empty 204s,
+no-store and structured errors against actual HTTP. Both suites run in root
+`npm test`; v1 checks also pin scope/quota/conflict/rate errors and Retry-After.
+Existing v0 and auth/health contracts are unchanged.
 
 ### v1 ad detail
 
