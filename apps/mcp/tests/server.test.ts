@@ -67,7 +67,7 @@ describe("MCP server", () => {
 
     expect(getAd?.description).toBeTruthy();
     const properties = (getAd?.inputSchema.properties ?? {}) as Record<string, unknown>;
-    expect(Object.keys(properties)).toEqual(["id"]);
+    expect(Object.keys(properties).sort()).toEqual(["id", "idempotency_key"]);
     expect(getAd?.inputSchema.required).toContain("id");
   });
 
@@ -81,10 +81,7 @@ describe("MCP server", () => {
   });
 
   it("returns an explicit not-implemented error for valid tool calls", async () => {
-    const calls = [
-      client.callTool({ name: "search_ads", arguments: { q: "serum", niche: ["skincare"] } }),
-      client.callTool({ name: "get_ad", arguments: { id: "ad_123" } }),
-    ];
+    const calls = [client.callTool({ name: "search_ads", arguments: { q: "serum", niche: ["skincare"] } })];
 
     for (const call of calls) {
       const result = await call;

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
-import { notImplemented } from "./not-implemented.js";
+import type { ApiClient } from "../api-client.js";
 
 const description = [
   "Retrieve the complete details of a single GetHookd advertisement by its id.",
@@ -10,16 +10,29 @@ const description = [
   "The id is an opaque string returned by search_ads and must not be parsed or treated as an integer.",
 ].join(" ");
 
-export function registerGetAd(server: McpServer): void {
+export function registerGetAd(server: McpServer, apiClient: ApiClient): void {
   server.registerTool(
     "get_ad",
     {
       title: "Get ad",
       description,
-      inputSchema: z.object({
+      inputSchema: z.strictObject({
         id: z.string().min(1).describe("The opaque ad id returned by search_ads. Treat it as an opaque string."),
+        idempotency_key: z
+          .string()
+          .min(1)
+          .max(128)
+          // Absolute end assertion: `$` alone also permits a final newline.
+          .regex(/^[A-Za-z0-9._:-]+(?![\s\S])/, "Use only ASCII letters, digits, '.', '_', ':', or '-'.")
+          .optional()
+          .describe(
+            "Optional case-sensitive billing identity: 1–128 ASCII letters, digits, '.', '_', ':', or '-'. Reuse only for a deliberate retry of the same request; omission generates no identity.",
+          ),
       }),
     },
-    async () => notImplemented("get_ad"),
+    async (input) => {
+      const { isError, body } = await apiClient.getAd(input);
+      return { isError, content: [{ type: "text", text: JSON.stringify(body) }] };
+    },
   );
 }

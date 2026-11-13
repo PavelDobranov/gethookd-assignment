@@ -4,8 +4,8 @@ MCP server for GetHookd. It exposes GetHookd ad search to MCP clients (AI agents
 over **Streamable HTTP**, calling the REST API (`apps/api`) over HTTP — never
 the database directly.
 
-This is an **intermediate M5 implementation**: `list_niches` is HTTP-backed;
-`search_ads` and `get_ad` remain explicit placeholders. Caller credential
+This is an **intermediate M5 implementation**: `list_niches` and `get_ad` are
+HTTP-backed; `search_ads` remains an explicit placeholder. Caller credential
 forwarding is not connected yet, so the protected real API rejects tool calls
 with its unchanged authentication error. No shared key or API bypass is provided.
 
@@ -62,7 +62,7 @@ no session state is kept. Loopback Host/Origin guards run in front of the handle
 | Tool          | Purpose                                                        | Inputs                                                                                                    |
 | ------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `search_ads`  | Search ads and return compact summaries.                       | `q`, `niche[]`, `format`, `status`, `started_after`, `brand_id`, `sort`, `limit`, `cursor` (all optional) |
-| `get_ad`      | Retrieve full details for one already-identified ad.           | `id` (required, opaque string)                                                                            |
+| `get_ad`      | Retrieve full details for one already-identified ad.           | `id` (required, opaque string), `idempotency_key` (optional)                                              |
 | `list_niches` | Discover valid niche slugs and display names for `search_ads`. | none                                                                                                      |
 
 `search_ads` follows the v1 search contract: niches are passed as an array of
@@ -83,14 +83,22 @@ only within a single brand), and extra pages come from the `cursor`.
 - The operator-configured API URL must be an HTTP(S) origin with no credentials,
   path, query or fragment. Requests have a 10-second deadline including body
   delivery, do not follow redirects and are never automatically retried.
-- Invalid arguments are rejected by SDK schema validation; `search_ads` and
-  `get_ad` still return `NOT_IMPLEMENTED` tool errors for valid inputs.
+- `get_ad` makes one `GET /api/v1/ads/<encoded-id>` and returns the complete
+  REST detail JSON in one text block, including long copy and nulls. IDs are
+  encoded as one segment without trimming or numeric interpretation; even exact
+  `.` and `..` IDs retain their encoded path rather than becoming another route.
+- Optional `get_ad.idempotency_key` accepts 1–128 case-sensitive ASCII letters,
+  digits, `.`, `_`, `:` or `-`, and is forwarded only as `Idempotency-Key`.
+  Omission generates no identity; repeated no-header calls remain separate reads.
+  Reusing a supplied key requests REST billing deduplication, not response replay.
+- Invalid arguments are rejected by SDK schema validation; `get_ad` also rejects
+  unknown arguments. `search_ads` still returns `NOT_IMPLEMENTED` for valid inputs.
 - Integration tests drive the real MCP protocol with the official client and
   a controlled HTTP API fixture; discovery does not make API requests.
 
 **Remaining for M5:**
 
-- Implement the remaining tool handlers against the REST API via `api-client.ts`:
+- Implement `search_ads` against the REST API via `api-client.ts`:
   translate MCP inputs into v1 REST requests (including repeated `niche` query
   parameters) and map REST responses into model-friendly output.
 - Forward the caller's API key as a Bearer credential to the REST API; reuse the
