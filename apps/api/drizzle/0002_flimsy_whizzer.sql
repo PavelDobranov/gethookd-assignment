@@ -1,0 +1,1 @@
+ALTER TABLE "ads" ADD COLUMN "inserted_xid" "xid8" DEFAULT pg_current_xact_id() NOT NULL;

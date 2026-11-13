@@ -1,6 +1,8 @@
 import { DrizzleQueryError } from "drizzle-orm";
 import type { ErrorRequestHandler } from "express";
 
+import { errorBody } from "../errors.js";
+
 // Map request failures to
 //  - 400 (invalid body)
 //  - 503 (database unavailable)
@@ -8,9 +10,7 @@ import type { ErrorRequestHandler } from "express";
 // without exposing internal error details
 export const handleErrors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
   if (isInvalidRequestBody(error)) {
-    res.status(400).json({
-      error: { code: "INVALID_REQUEST", message: "Invalid JSON request." },
-    });
+    res.status(400).json(errorBody("INVALID_REQUEST", "Invalid JSON request."));
 
     return;
   }
@@ -18,21 +18,14 @@ export const handleErrors: ErrorRequestHandler = (error: unknown, _req, res, _ne
   if (isDatabaseUnavailable(error)) {
     console.error("Database unavailable.");
 
-    res.status(503).json({
-      error: {
-        code: "SERVICE_UNAVAILABLE",
-        message: "Service unavailable.",
-      },
-    });
+    res.status(503).json(errorBody("SERVICE_UNAVAILABLE", "Service unavailable."));
 
     return;
   }
 
   console.error("Unexpected request failure.");
 
-  res.status(500).json({
-    error: { code: "INTERNAL_ERROR", message: "Internal server error." },
-  });
+  res.status(500).json(errorBody("INTERNAL_ERROR", "Internal server error."));
 };
 
 function isInvalidRequestBody(error: unknown): boolean {

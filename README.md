@@ -151,19 +151,215 @@ npm run start -w @gethookd/api  # run the compiled API after building
 The API listens on `0.0.0.0:3000`. `GET /api/health` returns HTTP 200 with
 `{"status":"ok"}` only after a successful PostgreSQL query. Connectivity failures
 return generic HTTP 503 `SERVICE_UNAVAILABLE`; health responses use
-`Cache-Control: no-store`. Unknown API routes return Express's HTTP 404 response,
-not a frontend SPA page.
+`Cache-Control: no-store`. Unknown API routes outside v1 return Express's HTTP 404
+response, not a frontend SPA page; v1 uses the structured errors described below.
 
 ```sh
 curl -i http://localhost:3000/api/health
 ```
 
-`apps/api/src/app.ts` exports `createApp({ db, jwtSecret })` without opening a
-listener or connecting/migrating/seeding the database. `src/server.ts` loads
+`apps/api/src/app.ts` exports `createApp({ db, jwtSecret, cursorSecret? })` without
+opening a listener or connecting/migrating/seeding the database. Omitting
+`cursorSecret` uses the exported public development default; the runtime server
+explicitly passes the loaded configuration. `src/server.ts` loads
 server-only configuration, owns the database pool and listener, and closes them
 on SIGINT/SIGTERM. Tests use native fetch against a new
 loopback listener on an ephemeral port per test and close it after each test.
 Tests live outside `src/` and are not included in the production build.
+
+## v1 niche discovery
+
+`GET /api/v1/niches` returns `{ "data": [{ "slug": "skincare", "name": "Skincare" }, ...] }`:
+exactly the existing 12 niches in catalog order, with no keywords, counts or
+pagination. It accepts no query parameters. Use the same stored API key as v0,
+now in one `Authorization: Bearer` header:
+
+```sh
+curl -i http://localhost:3000/api/v1/niches \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+```
+
+Each request checks PostgreSQL again; stored-key changes take effect on the next
+request. Query-string keys and portal JWTs cannot replace Bearer API keys. All v1
+successes and errors have `Cache-Control: no-store`. Authentication runs before
+path/query validation, so missing or invalid credentials receive 401 rather than
+protected diagnostics. No request URLs, keys, cursors or raw database errors are
+logged by this boundary.
+
+Errors have exactly these fields (wording may vary):
+
+```json
+{
+  "error": {
+    "code": "UNAUTHENTICATED",
+    "message": "A valid Bearer API key is required.",
+    "next_action": "Provide a stored API key in Authorization: Bearer <key>.",
+    "retryable": false,
+    "details": []
+  }
+}
+```
+
+Current codes are `UNAUTHENTICATED` (401), `NOT_FOUND` (404, unknown route or
+method), `AD_NOT_FOUND` (404, missing ad), `VALIDATION_ERROR` (422, unsupported resource query parameters or malformed
+path encoding or a decoded NUL in an ad ID), and `INTERNAL_ERROR` (500, including database failure). Only 500
+is retryable, after a short delay. Validation details contain `parameter`,
+`reason`, `allowed_values` and nullable `suggestion`; this endpoint accepts no
+query parameters, so its allowed-values list is empty. Unsupported HEAD returns
+404 headers without a body, as required by HTTP. v0 and portal errors are unchanged.
+Search additionally returns `INVALID_CURSOR`, `CURSOR_EXPIRED` and
+`CURSOR_QUERY_MISMATCH` (422); retain the original query/token or start a fresh
+search as directed. The [OpenAPI contract](docs/openapi/v1.yaml) is checked against
+actual HTTP responses; rate limiting remains M4 work.
+
+### v1 filtered search
+
+`GET /api/v1/ads` accepts only `q`, repeated `niche`, `format`, `status`,
+`started_after`, `brand_id`, `sort`, `limit` and `cursor`. Unknown names, duplicate
+scalars, invalid/empty enums, noncanonical niches, impossible dates and limits
+outside 1–100 return actionable 422 errors rather than silently broadening search.
+NUL characters in `q` (including URL-encoded `%00`) also return 422 before querying.
+Keyword whitespace is trimmed (case preserved); matching is case-insensitive on
+headline OR body, with literal `%`, `_` and backslash. Repeated niches combine
+with OR, deduplicate and sort; every other filter combines with AND. Dates are
+strict `YYYY-MM-DD`, with **exclusive** `start_date > started_after` matching.
+
+```sh
+curl -sS -G http://localhost:3000/api/v1/ads \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2' \
+  --data-urlencode 'q=serum' --data-urlencode 'niche=skincare' \
+  --data-urlencode 'niche=haircare' --data-urlencode 'started_after=2026-01-01' \
+  --data-urlencode 'limit=2'
+
+# Rank 1 first within one brand; unknown ranks last. Not cross-brand impressions.
+curl -sS 'http://localhost:3000/api/v1/ads?sort=impressions&brand_id=1&limit=2' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+# Missing brand_id intentionally produces 422 with a correction.
+curl -i 'http://localhost:3000/api/v1/ads?sort=impressions' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+
+# Exclusive boundary: ads starting ON 2026-10-04 do not match.
+curl -sS 'http://localhost:3000/api/v1/ads?started_after=2026-10-04' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+# Impossible calendar dates intentionally return actionable 422, not rollover.
+curl -i 'http://localhost:3000/api/v1/ads?started_after=2026-02-30' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+
+# Paste next_cursor from a response; omitted filters inherit the original query.
+CURSOR='<next_cursor>'
+curl -sS -G http://localhost:3000/api/v1/ads \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2' \
+  --data-urlencode "cursor=$CURSOR" --data-urlencode 'limit=10'
+```
+
+Responses contain `data` (the detail summary fields only, excluding body, end date,
+countries and discovery timestamp), normalized `applied_filters` (`q`, `niche`,
+`format`, `status`, `started_after`, `brand_id`), `sort`, effective `limit` (default
+20), nullable `next_cursor` and fixed UTC `cursor_expires_at`. Absent keyword is
+`""`, niches `[]`, other absent filters null. Empty/final pages have null cursors;
+empty pages retain the effective filters and expiry. No total or internal
+insertion marker is exposed.
+
+Default `newest` orders across brands by date descending, then bytewise ID
+ascending. `impressions` requires one brand and orders rank ascending, nulls last,
+then the same bytewise ID. Rank 1 is highest within that brand; gaps are retained,
+not renumbered. Null means unknown, not zero. Ranks are not impression counts and
+cannot compare impression magnitudes across brands or identify the highest-impression
+brand. Known ranks are unique within a brand; equal ranks in different brands do
+not imply equal impressions.
+
+To correct `sort=impressions` without a brand, add one known `brand_id` (as in the
+curl example above), or use `sort=newest` to search across brands. A valid but
+nonexistent brand returns an empty result, not a validation error. For niche
+corrections, replace `niche=Skincare` with `niche=skincare`, or
+`niche=Pet%20Supplies` with `niche=pet-supplies`; discover canonical values through
+`GET /api/v1/niches`. Corrections are advisory and never applied silently.
+
+Continuations may change page size or repeat equivalent normalized filters, but
+changed query meaning returns `CURSOR_QUERY_MISMATCH`. Tokens expire exactly 30
+minutes after page one, never renew, remain replayable and never replace auth.
+
+A short repeatable-read first page establishes insertion eligibility; continuations
+read live state while excluding all later-committed inserts, including backdated
+and already-in-flight inserts. Under supported ingest (inserts/deactivation, fixed
+ordering keys), forward walks do not repeat or skip initially matching ads that
+remain eligible. Unread deactivated ads disappear from active-filter searches but
+remain in unfiltered searches. Newly matching inactive ads have no completeness
+guarantee; start a fresh search for a new complete set. Each response computes days
+from one current UTC time, not the first-page clock. Exhaustion does not subscribe
+to later changes.
+
+Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-pagination.test.ts tests/v1-visibility.test.ts tests/v1-search.test.ts`
+passes 56 HTTP/PostgreSQL tests covering filter-sensitive fixtures, both sort
+walks, rank 1/gaps/cross-brand equal ranks, many bytewise null IDs, known-to-null
+and all-null pages, size changes, in-flight/later known and null insertion
+exclusion, live deactivation and newly inactive positions, normalized continuation,
+replay, UTC rollover, fixed expiry, per-request authentication and sanitized
+no-store errors.
+
+The controlled-ingest proof runs real `runIngestTick` transactions with injected
+time/randomness. A test-only wrapper pauses after all writes but before commit;
+page one completes on another connection while that transaction is still open.
+A later transaction commits before the boundary, defeating a max-xid shortcut.
+Both sorts exhaust small/changing pages for active, inactive and unfiltered
+searches while further ticks insert current/backdated ads and deactivate old and
+post-boundary ads. Assertions check ordered, exact continuously eligible coverage,
+no repeated IDs and exclusion even after later inserts become inactive. Newly
+inactive rows have no completeness assertion. No process sleeps establish ordering.
+
+Replays read live fields, agree with v0/detail at the same UTC time/state across
+midnight, retain exact expiry and continue after recreating the HTTP app with an
+independent pool. PostgreSQL session checks find no retained transactions between
+requests; a real timed-out first-page query rolls back under the unchanged
+two-second query/connection deadlines and leaves the pool usable. Disabling the
+insertion-visibility predicate makes all six controlled walks fail; restoring it
+passes. Removing the null-only continuation guard also fails on duplicate IDs.
+No production correction was needed. The cursor unit suite passes 95 tests.
+Actual-process ingest and OS-process restart checks are recorded separately in
+[M3 workflow verification](#m3-workflow-verification). Neither these deterministic
+checks nor the smoke runs establish production-scale performance.
+
+### v1 OpenAPI contract
+
+[OpenAPI 3.1](docs/openapi/v1.yaml) defines search, detail and niche discovery,
+Bearer authentication, strict inputs, response allowlists and current errors.
+Repeated niches use `style: form` with `explode: true`, not commas or brackets.
+The impressions/brand cross-field rule and live cursor guarantees are documented
+alongside the schemas. Rate limiting/429 remains M4 work.
+
+Run `npm run test:integration -w @gethookd/api -- tests/v1-openapi.test.ts` for
+real HTTP/PostgreSQL checks against the artifact using test-only YAML, Ajv2020 and
+format validation. The suite checks populated/empty/null responses, every current
+error code, request constraints and filter-sensitive fixtures. Drift probes reject
+incompatible required fields, enums, statuses and nested schemas; changing the
+artifact's sort enum to an unsupported value also makes the actual HTTP check fail.
+The root `npm test` includes this suite. Existing v0 and portal contracts are unchanged.
+
+### v1 ad detail
+
+`GET /api/v1/ads/:id` reads the current ad joined with its brand, independently of
+search cursors. Encode the exact opaque string ID as one URL path segment; IDs
+are not numbers and are not trimmed or normalized. No query parameters are accepted.
+
+```sh
+curl -i 'http://localhost:3000/api/v1/ads/seed-ad-000001' \
+  -H 'Authorization: Bearer gethookd-public-demo-api-key-m2'
+```
+
+The response is `{ "data": { ... } }` with exactly `id` (string), `brand_id`
+(integer), `brand_name`, `headline`, `niche` (slug), `format`, `status`,
+`start_date`, `days_active`, `impression_rank` (integer or null), `body_text`,
+`end_date` (date or null), `countries` (ISO-2 array), and `discovered_at` (UTC ISO
+timestamp). Dates use `YYYY-MM-DD`. Active days use the response's current UTC
+date; inactive days use the end date. Missing IDs return `AD_NOT_FOUND` with
+instructions to check the ID from search. Authentication, no-store, query
+rejection and sanitized server-error behavior match niche discovery.
+
+Focused verification: `npm run test:integration -w @gethookd/api -- tests/v1-resources.test.ts tests/v0.test.ts`
+checks real HTTP/PostgreSQL authentication, exact catalog/response allowlists,
+next-request key changes, duplicate credentials, isolated 401/404/422/injected-500,
+legacy compatibility, full active/inactive detail allowlists, exact encoded IDs,
+UTC midnight/v0 agreement, and detail-query failures after authentication.
 
 ## Server configuration
 
@@ -175,8 +371,10 @@ configuration to Vite. Missing `.env` is supported; other file-read failures are
 reported without revealing contents.
 
 Defaults are `gethookd` for `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
-`POSTGRES_DB`, plus a public development-only JWT signing placeholder of at least
-32 bytes. `JWT_SECRET` overrides must be at least 32 UTF-8 bytes. Empty,
+`POSTGRES_DB`, plus separate public development-only JWT and cursor secrets.
+The `CURSOR_SECRET` default is
+`gethookd-public-development-cursor-secret-do-not-use-in-production`.
+`JWT_SECRET` and `CURSOR_SECRET` overrides must each be at least 32 UTF-8 bytes. Empty,
 whitespace-only or control-character-containing settings fail with the variable
 name, never the value. `DATABASE_URL` must be a PostgreSQL URL with a host and
 database name.
@@ -206,7 +404,8 @@ in host context; API/setup containers select container context.
 Compose's PostgreSQL 17 service uses `POSTGRES_*` defaults or overrides, a
 healthcheck using the configured user/database, persistent storage, and port 5432
 bound to `127.0.0.1`. API/setup receive those values plus optional `DATABASE_URL`
-and `JWT_SECRET` from the exported environment or root `.env`. Absent overrides
+and the independent `JWT_SECRET` and `CURSOR_SECRET` from the exported environment
+or root `.env`. Absent overrides
 stay absent so the shared loader derives defaults; explicit empty values are not
 replaced with defaults. The web receives none of these settings.
 Explicitly empty database initialization values fail at
@@ -220,10 +419,65 @@ passwords. `docker compose down` preserves the volume. Keep overrides consistent
 with its existing credentials, or deliberately administer the existing database;
 never delete a developer volume to make a configuration change work.
 
-These credentials and the default signing secret are public development fixtures.
-Production requires a private signing secret, non-demo credentials, HTTPS, and an
+These credentials and both default secrets are public development fixtures.
+Production requires separate private JWT and cursor secrets, non-demo credentials, HTTPS, and an
 authentication hardening review. No server settings use the `VITE_` prefix or are
 imported by the web app.
+
+### Cursor secret operations
+
+`CURSOR_SECRET` is server-only configuration passed through server/app/v1 router
+composition for the search cursor codec. Never
+reuse `JWT_SECRET` or API-key material, and never prefix this setting with `VITE_`
+or pass it to the web build. Neither startup path
+requires a `.env` file or manual secret setup for local development.
+
+To generate a private override, run `openssl rand -hex 32` and store the output as
+`CURSOR_SECRET` in the optional root `.env` or your server's secret environment.
+The same override is selected by `npm run dev` and `docker compose up --build`.
+Do not commit it, print it in logs, or share resolved Compose configuration.
+
+The v1 cursor contract requires a stable secret across ordinary API restarts and
+all API instances sharing a database. Retaining the same
+secret and database history preserves otherwise valid, unexpired cursors; changing
+the secret invalidates existing cursors and clients must start fresh searches.
+After any database restore or replacement, rotate `CURSOR_SECRET` before serving
+requests, even if restoring the same database name. Restart host API processes or
+recreate API containers (`docker compose up -d --force-recreate api`) to apply the
+new value. Do not rotate `JWT_SECRET` as a substitute. No in-memory key registry or
+rotation UI is involved.
+
+The internal codec (`apps/api/src/ads/v1/cursor.ts`) is a trust-token (see
+[ADR-0004](docs/adr/0004-v1-cursor-trust-token.md)): `jose` encrypts an
+authenticated `dir`/A256GCM JWE under a SHA-256-derived, domain-separated,
+server-only key, with a versioned audience (`gethookd:ads:cursor:v1`) as the
+format/context guard. Because the token is authenticated encryption under a secret
+only the server holds, decrypted contents are trusted as server-issued: `zod`
+validates only the payload *shape* (and the cheap model enums) so `decode` returns
+a typed `CursorState` with no unsafe casts, while untrusted request input is
+validated where it enters (`apps/api/src/ads/v1/parameters.ts`), not re-validated
+inside the codec. Tokens carry only normalized query/sort, insertion snapshot, last
+position and original issue/expiry times—not credentials or result lists.
+Continuation code calls `encode` on decoded state with an updated position,
+preserving the original millisecond issue/expiry times so `cursor_expires_at` is
+byte-identical across pages. `decode` decrypts and authenticates before shape
+validation or expiry, and enforces the 30-minute lifetime at exact millisecond
+precision from the carried claim (jose's second-granularity `exp` is a rounded-up
+backstop only). Tokens can be replayed; they never authorize a request.
+
+Inbound cursors are limited to 4096 JWE-charset characters. Invalid, unsupported,
+tampered, wrong-secret or wrong-audience tokens raise sanitized `INVALID_CURSOR`;
+at or after expiry, valid tokens raise `CURSOR_EXPIRED`. Both require an unmodified
+valid token or a fresh search, not a silent restart. Search maps these errors to
+the v1 HTTP 422 envelope. Unlike the previous hand-rolled AES-GCM envelope, the
+codec has no producer-side size cap: a pathological insertion snapshot (≈1000
+concurrent in-flight transactions) could in principle encode past 4096 characters
+and would then be rejected inbound by `parameters.ts` rather than at encode time.
+Realistic snapshots are tiny (a few concurrent transactions), so this is accepted.
+
+Focused verification: `npm run test:unit -w @gethookd/api -- tests/v1-cursor.test.ts`
+covers both sorts, null ranks, replay/reconstruction, tampering, wrong-secret,
+audience and shape rejection, and the exact expiry boundary with deterministic clocks.
 
 ## Disposable PostgreSQL integration tests
 
@@ -453,7 +707,7 @@ failure through the root command; they never wait for random backdating.
 ## Legacy v0 parameter contract
 
 `GET /api/v0/ads?api_key=gethookd-public-demo-api-key-m2` serves the legacy
-contract. `apps/api/src/ads/router.ts` uses the raw query parser in `parameters.ts`
+contract. `apps/api/src/ads/v0/router.ts` uses the raw query parser in `parameters.ts`
 and validates the supplied key against PostgreSQL on every request; portal JWTs
 cannot substitute. Responses are not cached. All v0 failures, including database
 failures, return exactly HTTP 400 `{"error":"Invalid request"}` locally, without
@@ -785,18 +1039,107 @@ and `npm test` passed: 267 API unit, 261 disposable-PostgreSQL and 65 web tests
 (593 total), including the unchanged v0 contract. No required #51 check remains
 unexecuted; final milestone acceptance/human review is separate (#52).
 
+## M3 workflow verification
+
+Measured on 2026-11-12 for #72, from source snapshots of `b586b07`, with Node
+26.13.0/npm 11.20.0, Docker 29.7.2/Compose 5.5.1 and PostgreSQL 17.11. Neither
+snapshot contained `.env`; the Docker build context also had no host dependencies
+or build output. The developer stack stayed running and was not targeted.
+
+Commands actually executed (not inferred from unit tests):
+
+```sh
+npm ci
+npm run setup
+npm run dev
+npm run ingest
+# Separate clean source snapshot, then repeat after live ingest:
+docker compose -p gethookd-72-docker-qa6gt1 \
+  -f compose.yaml -f acceptance.override.yaml up --build -d
+# Repeat local setup; Docker down/up retains the same isolated volume.
+npm run build
+npm run lint
+npm run check
+npm test
+```
+
+**Isolation differences:** local setup used project `gethookd-72-local-qa6gt1`,
+`COMPOSE_FILE=compose.yaml:acceptance.override.yaml` and an explicit test-owned
+`DATABASE_URL` at loopback port 15472. The temporary override changed only
+published ports. `npm run dev` ran in a Node 26.13.0 container sharing that
+project's network and installed source snapshot, with `DATABASE_URL` pointing to
+`db:5432`; this avoided the occupied host API port without changing application
+code. Its API was published at 13172. Vite's root, health proxy and Bearer niche
+request returned 200 from inside that namespace (`http://[::1]:5173`); Vite's
+loopback listener was not reachable through the container's published port.
+The full-Docker project used ports 15473/13073/18073 and **no server environment
+overrides** for fresh startup. These are isolated execution checks, not claims
+that the occupied default host ports were retested or that a new checkout was
+created. Ingest used explicit host URLs for the corresponding isolated database.
+
+- **Fresh/repeated startup:** `npm ci`, local setup/dev, and full-Docker build/up
+  succeeded. Each initialized 20,000 ads, 300 brands and the public hashed key.
+  Root `npm run ingest` was opt-in. After ingest stopped, repeat local setup and
+  Docker `down` → `up --build -d` preserved complete evolved users, key IDs/hashes/
+  owners and ad rows, including insertion markers. Checks included a changed demo
+  hash, unrelated user and reassigned key owner; initialization did not reset them.
+- **M2 upgrades:** the actual `main` baseline (`fa2e9c9`) initializer populated
+  separate `m2_upgrade` databases. Before upgrading, a headline/date/status was
+  changed, a backdated ad added, and users/key ownership evolved. Current local
+  setup and Docker setup both migrated 20,001 existing ads: one non-null backfill
+  transaction marker, zero nulls, all prior business fields/users/keys unchanged.
+  A subsequent insert received `pg_current_xact_id()` by default. Only this
+  additive metadata was excluded when comparing pre-M3 ad rows.
+- **Live walks:** on fresh local/Docker databases, actual root ingest overlapped
+  unfiltered newest and brand-1 impressions paging. Each walk returned exactly
+  the initial 20,000/67 IDs, without duplicates or post-boundary inserts. Local
+  ingest inserted 6/deactivated 2; Docker inserted 3/deactivated 6; both exited 0
+  on SIGINT. A second local run explicitly held **both** first pages until a tick
+  committed before continuing: all 20,006/67 initial IDs were returned exactly
+  once, with 9 inserts/7 deactivations observed over 6.7 seconds and shutdown 0.
+  Random backdating/races were not inferred: controlled PostgreSQL suites prove
+  those guarantees separately. No walk-long idle transaction remained.
+- **HTTP/lifecycle:** direct APIs and built Nginx proxy passed Bearer discovery,
+  detail, multi-niche/date/keyword search, normalized echoes, brand-required 422,
+  canonical-niche suggestions, invalid-key 401, invalid/mismatched-cursor 422 and
+  changed-page-size continuation with fixed expiry/no-store. Actual API process
+  restarts in both workflows preserved cursors. Recreating Docker API with a
+  different public test `CURSOR_SECRET` returned nonretryable `INVALID_CURSOR`
+  with recovery guidance; fresh search succeeded. Restore itself was not tested;
+  [mandatory restore/replacement rotation](#cursor-secret-operations) still applies.
+- **Failure/log safety:** stopping isolated PostgreSQL produced sanitized
+  retryable 500 through direct API and built proxy, not 401/empty success; recovery
+  worked. Stopping API produced Nginx 502, not SPA HTML. A ten-second client probe
+  timed out; a bounded 75-second allowance observed the upstream failure without
+  changing server/database deadlines. Effective `nginx -T` retained access-log
+  off/error-log discard. Captured API/Vite/Nginx/setup/ingest output contained no
+  public key, rejected-key/cursor sentinels or sampled real continuation tokens
+  across success, rejection and upstream failure. Nginx diagnostics remain
+  deliberately discarded, not recoverable or a v1 JSON envelope on upstream 502.
+- **Gates/cleanup:** all four root checks passed: 494 API unit, 437 real-PostgreSQL
+  and 65 web tests (996 total), no skips. Focused checks passed 95 cursor tests
+  for the ADR and 66 HTTP/PostgreSQL OpenAPI tests for the README examples.
+  Only this run's containers/networks/volumes were removed after inspecting
+  project labels and the dev-container identity;
+  developer services remained running. No application behavior, deadlines,
+  assertions, dependencies or user-owned documentation were changed.
+
+No production-scale benchmark, arbitrary mutation/multi-worker guarantee, browser
+E2E suite or 30-minute wall-clock expiry wait is claimed. Exact expiry/size,
+controlled commit races, live status semantics and OpenAPI agreement are covered
+by deterministic suites. Cursor rationale and operational limits are in
+[ADR-0002](docs/adr/0002-v1-cursor-visibility.md).
+
 ## Remaining work, in priority order
 
-1. **M2 final acceptance (#52):** review the completed slices and workflow results
-   with the human. `DESIGN.md` and `AI_NOTES.md` remain user-owned; they were not
-   created or modified by this verification.
-2. **M3 — v1 search:** strict discoverable filters, deterministic/null-last sorting,
-   stable cursor promises under ingest, shared UTC `days_active`, structured
-   errors and an OpenAPI regression contract. Preserve v0's intentional quirks.
-3. **M4 — keys and usage:** managed key lifecycle/scopes/revocation, shared
+1. **M3 final acceptance (#73):** human review of the implemented v1 contracts,
+   OpenAPI and isolated workflow results. `DESIGN.md` and `AI_NOTES.md` remain
+   user-owned and were not created or modified. Preserve v0's intentional quirks.
+2. **M4 — keys and usage:** managed key lifecycle/scopes/revocation, shared
    60-request/minute limits, exact/idempotent billing and the functional portal.
    Implement/test the [v0 429 exception](docs/adr/0001-v0-rate-limit-exception.md)
-   here, not in M2; quota enforcement remains a SHOULD requirement.
-4. **M5 — MCP and evaluation:** REST-backed tools consuming shared controls,
+   here, not in M3; quota enforcement remains a SHOULD requirement. No current v1
+   429 response or production-ready authentication is claimed.
+3. **M5 — MCP and evaluation:** REST-backed tools consuming shared controls,
    compact outputs and real-model/client evaluation with the required transcripts.
    Cross-brand impression comparisons remain unsupported by brand-local ranks.

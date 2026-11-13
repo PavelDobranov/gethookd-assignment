@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
 import { createDatabase } from "../src/db/client.js";
 import { generateFixtures } from "../src/db/fixtures.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import { seedWorld } from "../src/db/seed-world.js";
 
 const worldUrl = new URL(inject("postgresUrl"));
 worldUrl.pathname = "/gethookd_world_test";
@@ -52,10 +53,35 @@ function insertAd(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
   return db.execute(sql`
-    INSERT INTO ads SELECT * FROM jsonb_populate_record(NULL::ads, ${JSON.stringify(record)}::jsonb)
+    INSERT INTO ads (id, brand_id, headline, body_text, niche, format, status,
+      start_date, end_date, impression_rank, countries, discovered_at)
+    SELECT id, brand_id, headline, body_text, niche, format, status,
+      start_date, end_date, impression_rank, countries, discovered_at
+    FROM jsonb_populate_record(NULL::ads, ${JSON.stringify(record)}::jsonb)
     RETURNING *
   `);
 }
+
+it("defaults insertion provenance to the top-level transaction even inside a savepoint and preserves it on updates", async () => {
+  await db.transaction(async (tx) => {
+    const {
+      rows: [transaction],
+    } = await tx.execute(sql`SELECT pg_current_xact_id()::text AS xid`);
+    await tx.transaction(async (nested) => {
+      await nested.insert(ads).values(generateFixtures().ads[0]);
+      const {
+        rows: [stored],
+      } = await nested.execute(sql`SELECT inserted_xid::text AS xid FROM ads`);
+      expect(stored.xid).toBe(transaction.xid);
+      expect(typeof stored.xid).toBe("string");
+    });
+    await tx.execute(sql`UPDATE ads SET status = 'inactive', end_date = start_date`);
+    expect((await tx.execute(sql`SELECT inserted_xid::text AS xid FROM ads`)).rows).toEqual([transaction]);
+  });
+  await expect(db.execute(sql`UPDATE ads SET inserted_xid = NULL`)).rejects.toMatchObject({
+    cause: { code: "23502", column: "inserted_xid" },
+  });
+});
 
 it("has only the intended storage columns and PostgreSQL identity/date/array types", async () => {
   const result = await db.execute(sql`
@@ -77,6 +103,7 @@ it("has only the intended storage columns and PostgreSQL identity/date/array typ
       ["impression_rank", "int4"],
       ["countries", "_text"],
       ["discovered_at", "timestamptz"],
+      ["inserted_xid", "xid8"],
     ].map(([column_name, udt_name]) => ({
       table_name: "ads",
       column_name,
@@ -105,12 +132,12 @@ it("has only the intended storage columns and PostgreSQL identity/date/array typ
 it("round-trips domain fixtures through Drizzle and preserves all world records on migration replay", async () => {
   const ad = generateFixtures().ads[0];
   const [stored] = await db.insert(ads).values(ad).returning();
-  expect(stored).toEqual(ad);
+  expect(stored).toEqual({ ...ad, insertedXid: expect.stringMatching(/^\d+$/) });
   const keysBefore = await db.insert(apiKeys).values({ userId: ownerId, keyHash: "round-trip-hash" }).returning();
   const brandsBefore = await db.select().from(brands).orderBy(brands.id);
   const usersBefore = await db.select().from(users);
   await migrate(db, { migrationsFolder: "drizzle" });
-  expect(await db.select().from(ads)).toEqual([ad]);
+  expect(await db.select().from(ads)).toEqual([stored]);
   expect(await db.select().from(apiKeys)).toEqual(keysBefore);
   expect(await db.select().from(brands).orderBy(brands.id)).toEqual(brandsBefore);
   expect(JSON.stringify(await db.select().from(users)) === JSON.stringify(usersBefore)).toBe(true);
@@ -272,7 +299,7 @@ it.each(["id", "user_id", "key_hash"])("rejects NULL api_keys.%s", async (column
   ).rejects.toMatchObject({ cause: { code: "23502", column } });
 });
 
-it("upgrades an M1 database without changing users and replays the complete migration ledger unchanged", async () => {
+it("upgrades M1 and a populated M2 database without changing original records or replaying migrations", async () => {
   const directory = await mkdtemp(join(tmpdir(), "gethookd-m1-migrations-"));
   const upgradeUrl = new URL(worldUrl);
   upgradeUrl.pathname = "/gethookd_world_upgrade";
@@ -292,7 +319,50 @@ it("upgrades an M1 database without changing users and replays the complete migr
     const before = await connection.db.select().from(users);
     const oldLedger = await connection.db.execute(sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`);
     expect(oldLedger.rows).toHaveLength(1);
+    const m2 = journal.entries[1];
+    expect(m2.tag).toBe("0001_lucky_next_avengers");
+    await writeFile(join(directory, "meta/_journal.json"), JSON.stringify({ ...journal, entries: [first, m2] }));
+    await writeFile(join(directory, `${m2.tag}.sql`), await readFile(`drizzle/${m2.tag}.sql`));
+    await migrate(connection.db, { migrationsFolder: directory });
+    await connection.db.transaction((tx) => seedWorld(tx, generateFixtures()));
+    await connection.db.execute(sql`UPDATE ads SET discovered_at = '2026-10-05T12:00:00.123456Z'
+      WHERE id = 'seed-ad-000001'`);
+    // Preserve all original values, including timestamp microseconds, in storage.
+    const readOriginalAds = () =>
+      connection.db.execute(sql`
+      SELECT row_to_json(original)::text AS record FROM (
+        SELECT id, brand_id, headline, body_text, niche, format, status, start_date,
+          end_date, impression_rank, countries, discovered_at FROM ads ORDER BY id
+      ) original
+    `);
+    const originalAds = await readOriginalAds();
+    expect(originalAds.rows).toHaveLength(20_000);
+    const originalBrands = await connection.db.select().from(brands).orderBy(brands.id);
+    const [owner] = before;
+    const originalKeys = await connection.db
+      .insert(apiKeys)
+      .values({ userId: owner.id, keyHash: "m2-key-hash" })
+      .returning();
+    const {
+      rows: [lower],
+    } = await connection.db.execute(sql`SELECT pg_current_xact_id()::text AS xid`);
+    const started = performance.now();
     await migrate(connection.db, { migrationsFolder: "drizzle" });
+    console.info(
+      `[migration] populated M2 (20,000 ads): ${(performance.now() - started).toFixed(0)}ms; unchanged 2000ms query/statement deadlines`,
+    );
+    expect(await readOriginalAds()).toMatchObject({ rows: originalAds.rows });
+    expect(await connection.db.select().from(brands).orderBy(brands.id)).toEqual(originalBrands);
+    expect(await connection.db.select().from(apiKeys)).toEqual(originalKeys);
+    const markers = await connection.db.select({ xid: ads.insertedXid }).from(ads);
+    expect(markers).toHaveLength(20_000);
+    const uniqueMarkers = [...new Set(markers.map(({ xid }) => xid))];
+    expect(uniqueMarkers).toHaveLength(1);
+    const {
+      rows: [upper],
+    } = await connection.db.execute(sql`SELECT pg_current_xact_id()::text AS xid`);
+    expect(BigInt(uniqueMarkers[0])).toBeGreaterThan(BigInt(lower.xid));
+    expect(BigInt(uniqueMarkers[0])).toBeLessThan(BigInt(upper.xid));
     expect(JSON.stringify(await connection.db.select().from(users)) === JSON.stringify(before)).toBe(true);
     const ledger = await connection.db.execute(sql`SELECT * FROM drizzle.__drizzle_migrations ORDER BY id`);
     expect(ledger.rows[0]).toEqual(oldLedger.rows[0]);
@@ -314,6 +384,8 @@ it("upgrades an M1 database without changing users and replays the complete migr
       ledger.rows,
     );
     expect(JSON.stringify(await connection.db.select().from(users)) === JSON.stringify(before)).toBe(true);
+    expect(await readOriginalAds()).toMatchObject({ rows: originalAds.rows });
+    expect(await connection.db.select({ xid: ads.insertedXid }).from(ads)).toEqual(markers);
   } finally {
     await connection.close();
     await rm(directory, { recursive: true, force: true });

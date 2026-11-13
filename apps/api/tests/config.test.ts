@@ -30,6 +30,50 @@ describe("server configuration", () => {
     expect(Buffer.byteLength(config.jwtSecret)).toBeGreaterThanOrEqual(32);
   });
 
+  it("provides the same independent public cursor default in both startup contexts", () => {
+    for (const context of ["host", "container"] as const) {
+      const config = loadConfig({ env: {}, envFile: null, context });
+      expect(config.cursorSecret).toBe("gethookd-public-development-cursor-secret-do-not-use-in-production");
+      expect(config.cursorSecret).not.toBe(config.jwtSecret);
+      expect(
+        loadConfig({
+          env: { JWT_SECRET: "independent-jwt-secret-at-least-32-bytes" },
+          envFile: null,
+          context,
+        }).cursorSecret,
+      ).toBe(config.cursorSecret);
+    }
+  });
+
+  it.each(["host", "container"] as const)(
+    "loads a stable cursor override with exported-env precedence in %s context",
+    (context) => {
+      const fileSecret = "file-cursor-secret-at-least-32-bytes";
+      const exportedSecret = "exported-cursor-secret-at-least-32-bytes";
+      const path = envFile(`CURSOR_SECRET=${fileSecret}\n`);
+      const defaultJwt = loadConfig({ env: {}, envFile: null }).jwtSecret;
+      expect(loadConfig({ env: {}, envFile: path, context }).cursorSecret).toBe(fileSecret);
+      const before = { ...process.env };
+      const config = loadConfig({
+        env: { CURSOR_SECRET: exportedSecret },
+        envFile: path,
+        context,
+      });
+      expect(config.cursorSecret).toBe(exportedSecret);
+      expect(config.jwtSecret).toBe(defaultJwt);
+      expect(loadConfig({ env: { CURSOR_SECRET: exportedSecret }, envFile: null }).cursorSecret).toBe(
+        config.cursorSecret,
+      );
+      expect(process.env).toEqual(before);
+    },
+  );
+
+  it("measures cursor secrets in UTF-8 bytes without trimming valid values", () => {
+    const cursorSecret = ` ${"é".repeat(15)} `;
+    expect(Buffer.byteLength(cursorSecret, "utf8")).toBe(32);
+    expect(loadConfig({ env: { CURSOR_SECRET: cursorSecret }, envFile: null }).cursorSecret).toBe(cursorSecret);
+  });
+
   it("derives container URLs and safely encodes credentials and database names", () => {
     const config = loadConfig({
       envFile: null,
@@ -89,7 +133,7 @@ describe("server configuration", () => {
     expect(() => loadConfig({ env: {}, envFile: join(path, "child") })).toThrow("Unable to read root .env");
   });
 
-  it.each(["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "DATABASE_URL", "JWT_SECRET"])(
+  it.each(["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "DATABASE_URL", "JWT_SECRET", "CURSOR_SECRET"])(
     "rejects explicitly empty %s, including exported overrides",
     (key) => {
       const path = envFile(`${key}=valid-file-value\n`);
@@ -102,6 +146,14 @@ describe("server configuration", () => {
     ["POSTGRES_DB", "bad\nname"],
     ["POSTGRES_PASSWORD", "bad\0password"],
     ["JWT_SECRET", "short-private-secret"],
+    ["CURSOR_SECRET", ""],
+    ["CURSOR_SECRET", " ".repeat(32)],
+    ["CURSOR_SECRET", "a".repeat(31)],
+    ["CURSOR_SECRET", "é".repeat(15)],
+    ["CURSOR_SECRET", `${"a".repeat(32)}\n`],
+    ["CURSOR_SECRET", `${"a".repeat(32)}\0`],
+    ["CURSOR_SECRET", `${"a".repeat(32)}\u007f`],
+    ["CURSOR_SECRET", `${"a".repeat(32)}\u0085`],
     ["DATABASE_URL", "https://private:password@remote/db"],
     ["DATABASE_URL", "postgres://private:password@/db"],
     ["DATABASE_URL", "postgres://remote"],

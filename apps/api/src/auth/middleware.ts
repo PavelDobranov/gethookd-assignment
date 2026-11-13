@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 
+import { errorBody } from "../shared/errors.js";
 import type { createAuthService } from "./service.js";
 
 export type AuthenticatedLocals = {
@@ -22,9 +23,7 @@ export function createRequireAuthentication(auth: Pick<ReturnType<typeof createA
     const user = token ? await auth.getUser(token) : null;
 
     if (!user) {
-      res.status(401).json({
-        error: { code: "UNAUTHENTICATED", message: "Authentication required." },
-      });
+      res.status(401).json(errorBody("UNAUTHENTICATED", "Authentication required."));
 
       return;
     }

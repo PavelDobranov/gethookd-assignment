@@ -1,7 +1,13 @@
 import { sql } from "drizzle-orm";
-import { check, date, integer, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { check, customType, date, integer, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 
 import { type Ad, adFormats, adStatuses, niches } from "../ads/index.js";
+
+// Operational insertion provenance, not part of the public ad domain. Keep xid8
+// as text: PostgreSQL transaction IDs must never pass through JS numbers.
+const xid8 = customType<{ data: string; driverData: string }>({
+  dataType: () => "xid8",
+});
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -31,6 +37,7 @@ export const ads = pgTable(
     impressionRank: integer("impression_rank"),
     countries: text("countries").array().notNull(),
     discoveredAt: timestamp("discovered_at", { withTimezone: true }).notNull(),
+    insertedXid: xid8("inserted_xid").notNull().default(sql`pg_current_xact_id()`),
   },
   (table) => [
     // DDL requires literal catalog constants, not runtime bind parameters.

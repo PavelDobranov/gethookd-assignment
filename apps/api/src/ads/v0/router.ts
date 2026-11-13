@@ -1,8 +1,8 @@
 import { type RequestHandler, Router } from "express";
 
-import { validateApiKey } from "../api-keys/index.js";
-import type { createDatabase } from "../db/client.js";
-import { disableCaching } from "../shared/middleware/disable-caching.js";
+import { validateApiKey } from "../../api-keys/index.js";
+import type { createDatabase } from "../../db/client.js";
+import { disableCaching } from "../../shared/middleware/disable-caching.js";
 import { parseAdParameters } from "./parameters.js";
 import { queryAds } from "./query.js";
 
@@ -24,7 +24,7 @@ function createGetAdsHandler(db: ReturnType<typeof createDatabase>["db"]): Reque
   };
 }
 
-export function createAdsRouter({ db }: { db: ReturnType<typeof createDatabase>["db"] }) {
+export function createRouter({ db }: { db: ReturnType<typeof createDatabase>["db"] }) {
   const router = Router();
   const handleGetAds = createGetAdsHandler(db);
 
