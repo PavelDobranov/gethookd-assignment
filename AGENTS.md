@@ -6,4 +6,4 @@
 - Follow `docs/agents/api-file-structure.md` when adding or modifying API code.
 
 ## Project documentation and architectural decisions
-- Keep project documentation in `docs/` and architectural decision records (ADRs) in `docs/adr/`.
+- Keep project documentation in `docs/` and architectural decision records (ADRs) in `docs/agents/adr/`.

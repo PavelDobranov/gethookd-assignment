@@ -158,7 +158,7 @@ The portal's **Connect Claude Code** panel shows this same template with a copy 
 
 Tools follow the v1 search contract and preserve REST responses verbatim: omitted filters inherit REST normalization and cursor defaults, REST error envelopes pass through (`isError: true`), and MCP never retries automatically. A reused `idempotency_key` requests REST billing deduplication (not response replay); `list_niches` and failed reads are not billed.
 
-**Limits (M5 deferrals).** There is no enforced response-size budget — search summaries and full ad details are reproduced verbatim, so large payloads can consume model context. Portal first-call detection, Playwright/browser E2E, and automated evaluation replay are deferred; real-model evaluation evidence (`docs/MCP_EVAL.md`) is the remaining M5 work. See [ADR-0005](docs/adr/) for the shared-control rationale.
+**Limits (M5 deferrals).** There is no enforced response-size budget — search summaries and full ad details are reproduced verbatim, so large payloads can consume model context. Portal first-call detection, Playwright/browser E2E, and automated evaluation replay are deferred; real-model evaluation evidence (`docs/MCP_EVAL.md`) is the remaining M5 work. See [ADR-0005](docs/agents/adr/) for the shared-control rationale.
 
 ## Development
 
@@ -199,8 +199,8 @@ apps/
 scripts/
   setup.mjs          Local database setup / migrate / seed
 docs/
-  adr/               Architecture Decision Records
   agents/            Engineering and agent conventions
+    adr/             Architecture Decision Records
   openapi/           REST API contracts
   sessions/          Milestone design-session transcripts
   DESIGN.md          Design overview and trade-offs

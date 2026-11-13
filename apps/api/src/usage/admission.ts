@@ -16,7 +16,7 @@ export type Admission =
 // 500ms lock_timeout. That is self-inflicted contention, not a stuck lock, so a bounded
 // retry of the aborted attempt is correct: every request still receives a decision, and
 // a genuinely held lock (whose waiter does trip the 500ms lock_timeout each time) still
-// fails closed once the attempts are spent. See docs/adr/0006-admission-contention-retry.md.
+// fails closed once the attempts are spent. See docs/agents/adr/0006-admission-contention-retry.md.
 const MAX_ADMISSION_ATTEMPTS = 5;
 
 /** Commit authentication/allowance before any scope, input, read or billing work. */
