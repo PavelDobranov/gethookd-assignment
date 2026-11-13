@@ -234,6 +234,75 @@ it("search mapping, cursor encoding and JSON serialization all precede settlemen
   expect(await bindings()).toEqual(before);
 });
 
+function legacy(query = "", header?: string, key = credential, path = "/ads", method = "GET") {
+  return fetch(`${origin.replace("/api/v1", "/api/v0")}${path}?api_key=${key}&${query}`, {
+    method,
+    headers: header === undefined ? {} : { "Idempotency-Key": header },
+  });
+}
+async function legacyError(response: Response) {
+  expect(response.status).toBe(400);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ error: "Invalid request" });
+}
+it("v0 bills effective forgiving pages, keeps failures free and separates endpoint/key bindings", async () => {
+  expect((await legacy("q=absent&niche=unknown&per_page=101", "mixed")).status).toBe(200);
+  expect((await legacy("per_page=100&q=absent&ignored=yes", "mixed")).status).toBe(200);
+  expect(await count()).toBe(1);
+  await error(await request("/ads?q=absent", "mixed"), 409, "IDEMPOTENCY_CONFLICT");
+  await legacyError(await legacy("page=2", "mixed"));
+  await legacyError(await legacy("page=bad", "unused"));
+  await legacyError(await legacy("", "bad value!"));
+  expect((await legacy("page=999")).status).toBe(200);
+  const second = `${credential}-second`;
+  await connection.db.insert(apiKeys).values(apiKeyFixture(ownerId, hashApiKey(second), second));
+  expect((await legacy("q=absent", "mixed", second)).status).toBe(200);
+  expect(await count()).toBe(3);
+  await connection.db.execute(sql`UPDATE monthly_usage SET count = 1000 WHERE owner_id = ${ownerId}::uuid`);
+  expect((await legacy("q=absent&per_page=100", "mixed")).status).toBe(200);
+  await legacyError(await legacy());
+  await error(await request(), 403, "QUOTA_EXCEEDED");
+  expect(await count()).toBe(1000);
+});
+it("v0 and v1 share admissions including authenticated invalid paths, methods and parameters", async () => {
+  await legacyError(await legacy("page=bad"));
+  await legacyError(await legacy("", undefined, credential, "/unknown"));
+  await legacyError(await legacy("", undefined, credential, "/ads", "POST"));
+  // Ambiguous/missing/invalid credentials must not consume this key's allowance.
+  await legacyError(await legacy(`api_key=${credential}`));
+  await legacyError(await legacy("", undefined, "wrong"));
+  for (let i = 0; i < 57; i++) expect((await request("/niches")).status).toBe(200);
+  const limited = await legacy("page=bad");
+  expect(limited.status).toBe(429);
+  const wait = Number(limited.headers.get("retry-after"));
+  expect(wait).toBeGreaterThanOrEqual(1);
+  expect(wait).toBeLessThanOrEqual(60);
+  const body = await limited.json();
+  expect(body.error.code).toBe("RATE_LIMITED");
+  expect(body.error.retryable).toBe(true);
+  expect(body.error.next_action).toContain(String(wait));
+  await error(await request("/niches"), 429, "RATE_LIMITED");
+  expect(await count()).toBe(0);
+});
+it("v0 maps scope and internal failures to generic errors without charging", async () => {
+  await connection.db
+    .update(apiKeys)
+    .set({ scopes: ["keys:manage"] })
+    .where(eq(apiKeys.id, keyId));
+  await legacyError(await legacy());
+  await connection.db
+    .update(apiKeys)
+    .set({ scopes: ["search:read"] })
+    .where(eq(apiKeys.id, keyId));
+  await connection.db.execute(sql`ALTER TABLE monthly_usage RENAME TO monthly_usage_unavailable`);
+  try {
+    await legacyError(await legacy());
+  } finally {
+    await connection.db.execute(sql`ALTER TABLE monthly_usage_unavailable RENAME TO monthly_usage`);
+  }
+  expect(await count()).toBe(0);
+});
+
 it("lost delivery stays durably charged; header retry is free, no-header retry is a new charge", async () => {
   await expect(request("/ads/accounting-a", "lost", credential, true)).rejects.toThrow();
   expect(await count()).toBe(1);

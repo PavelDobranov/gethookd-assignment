@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted; implementation deferred to M4 (`keys-and-usage`). This records the
-confirmed decision in the approved [M2 specification (#34)](https://github.com/PavelDobranov/gethookd-assignment/issues/34),
-not a change to current runtime behavior.
+Accepted; implemented in M4 (`keys-and-usage`, #97), following the approved
+[M2 specification (#34)](https://github.com/PavelDobranov/gethookd-assignment/issues/34)
+and M4 specification #76.
 
 ## Date
 
@@ -25,19 +25,22 @@ MCP will consume those controls when introduced in M5.
 
 ## Decision
 
-When M4 implements shared rate limiting, **v0 rate-limit failures will return
+**v0 rate-limit failures return
 HTTP 429 with an accurate `Retry-After` as an explicit exception to the legacy
 HTTP 400 rule**. The wait must reflect the shared per-key allowance, not a
 separate v0 allowance.
 
-All existing v0 errors remain generic HTTP 400 with
-`{"error":"Invalid request"}` in M2, including missing/invalid keys, invalid
-pagination, duplicate recognized parameters and unexpected database failures.
-No rate-limit middleware, exception behavior or future-behavior tests are added
-in M2. M4 owns exception implementation, rate-limit tests and the corresponding
-v0 regression-contract update. This decision does not authorize changing other
-v0 errors or adopting v1's error envelope for them; it does not specify a new
-v0 rate-limit response body.
+The 429 body is the shared rich `RATE_LIMITED` envelope: `error` contains
+`code`, `message`, `next_action`, `retryable: true` and `details: []`.
+Both guidance strings state the same integer wait as `Retry-After`.
+
+All other v0 errors remain generic HTTP 400 with `{"error":"Invalid request"}`,
+including missing/invalid/revoked or duplicate credentials, scope, pagination,
+idempotency-header/conflict, quota and unexpected failures. A single usable query
+credential authenticates and enters the shared allowance before protected
+validation, even for unsupported paths/methods. Supported search keeps its
+forgiving parser, query, ordering and success shape; billing uses its effective
+parameters. This does not authorize adopting strict v1 validation.
 
 ## Rationale and alternatives
 
@@ -51,11 +54,9 @@ v0 rate-limit response body.
 
 ## Consequences
 
-- In M4, clients that assume every v0 error is HTTP 400 must also handle HTTP 429
+- Clients that assume every v0 error is HTTP 400 must also handle HTTP 429
   and honor `Retry-After`; this is an intentional compatibility exception, not
   a claim of fully unchanged error behavior.
-- Existing v0 quirks and non-rate-limit error behavior remain preserved. M2's
-  current contract tests stay unchanged and remain a regression gate.
-- M4 must carry this ADR into its regression-contract update and prove shared
-  rate limiting and accurate retry timing. M5 must verify MCP parity with those
-  shared controls. Recording the decision here does not implement either milestone.
+- Existing v0 quirks and non-rate-limit error behavior remain regression gates.
+  Mixed-version HTTP tests cover shared admission and billing; low-level admission
+  tests cover exact rolling boundaries. M5 still must verify MCP parity.

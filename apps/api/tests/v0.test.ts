@@ -457,8 +457,17 @@ it("keeps application output silent for sentinel keys, raw query data and creden
     await getAds("q=public-v0-search-sentinel");
     await expectInvalid("api_key=public-v0-invalid-key-sentinel");
     await expectInvalid(`api_key=${key}&page=bad`);
-    // Inject credential-bearing errors at auth, count and row-query boundaries.
-    for (const successfulSelects of [0, 1, 2]) {
+    // Admission checks out its own client before starting the authentication transaction.
+    const authFailure = vi
+      .spyOn(connection.db.$client, "connect")
+      .mockRejectedValueOnce(new Error(`public-v0-raw-error-sentinel /api/v0/ads?api_key=${key}`));
+    try {
+      await expectInvalid(`api_key=${key}`);
+    } finally {
+      authFailure.mockRestore();
+    }
+    // Inject credential-bearing errors at the unchanged count and row-query boundaries.
+    for (const successfulSelects of [0, 1]) {
       const failure = vi.spyOn(connection.db, "select");
       for (let index = 0; index < successfulSelects; index++) {
         failure.mockImplementationOnce(select);
