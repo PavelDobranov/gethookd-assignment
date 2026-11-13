@@ -1,6 +1,5 @@
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { request as httpRequest } from "node:http";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -42,7 +41,12 @@ describe("extractCredential", () => {
 /** A configurable upstream recording each request's relevant headers. */
 type Recorded = { method: string; url: string; authorization?: string; idempotency?: string; secret?: string };
 
-function startUpstream(): Promise<{ upstream: Server; baseUrl: string; recorded: Recorded[]; setBody: (b: unknown) => void }> {
+function startUpstream(): Promise<{
+  upstream: Server;
+  baseUrl: string;
+  recorded: Recorded[];
+  setBody: (b: unknown) => void;
+}> {
   const recorded: Recorded[] = [];
   let body: unknown = { data: [] };
   const upstream = createServer((req, res) => {
@@ -68,7 +72,11 @@ function startUpstream(): Promise<{ upstream: Server; baseUrl: string; recorded:
   });
 }
 
-async function connectClient(url: URL, authorization?: string, extraHeaders: Record<string, string> = {}): Promise<Client> {
+async function connectClient(
+  url: URL,
+  authorization?: string,
+  extraHeaders: Record<string, string> = {},
+): Promise<Client> {
   const client = new Client({ name: "auth-test-client", version: "0.0.0" });
   const headers: Record<string, string> = { ...extraHeaders };
   if (authorization !== undefined) headers.Authorization = authorization;
@@ -160,7 +168,10 @@ describe("credential forwarding over the real protocol", () => {
   });
 
   it("keeps parallel callers' credentials isolated end to end", async () => {
-    const [a, b] = await Promise.all([connectClient(url, "Bearer key.AAAAAAAA"), connectClient(url, "Bearer key.BBBBBBBB")]);
+    const [a, b] = await Promise.all([
+      connectClient(url, "Bearer key.AAAAAAAA"),
+      connectClient(url, "Bearer key.BBBBBBBB"),
+    ]);
 
     const [resultA, resultB] = await Promise.all([
       a.callTool({ name: "list_niches", arguments: {} }),
@@ -195,13 +206,10 @@ describe("loopback Host/Origin protection", () => {
   /** Raw POST so forbidden Host/Origin values can be set, which fetch disallows. */
   function rawPost(headers: Record<string, string>): Promise<number> {
     return new Promise((resolve, reject) => {
-      const req = httpRequest(
-        { host: "127.0.0.1", port, path: "/mcp", method: "POST", headers },
-        (res) => {
-          res.resume();
-          resolve(res.statusCode ?? 0);
-        },
-      );
+      const req = httpRequest({ host: "127.0.0.1", port, path: "/mcp", method: "POST", headers }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
       req.once("error", reject);
       req.end("{}");
     });

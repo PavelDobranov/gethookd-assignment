@@ -79,10 +79,9 @@ describe("get_ad protocol to HTTP boundary", () => {
     await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
     client = new Client({ name: "get-ad-client", version: "0.0.0" });
     await client.connect(
-      new StreamableHTTPClientTransport(
-        new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`),
-        { requestInit: { headers: { Authorization: "Bearer key.FORWARD" } } },
-      ),
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`), {
+        requestInit: { headers: { Authorization: "Bearer key.FORWARD" } },
+      }),
     );
     expect(requests).toEqual([]);
   });
