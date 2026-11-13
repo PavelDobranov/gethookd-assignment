@@ -8,6 +8,15 @@ import { TOKEN_STORAGE_KEY } from "./auth";
 vi.mock("./portal-api", async (original) => ({
   ...(await original<typeof import("./portal-api")>()),
   listKeys: vi.fn(async () => ({ data: [], limit: 20, offset: 0, has_more: false })),
+  getUsage: vi.fn(async () => ({
+    data: {
+      period_start: "2026-06-01T00:00:00.000Z",
+      period_end: "2026-07-01T00:00:00.000Z",
+      billable_calls: 127,
+      quota: 1000,
+      remaining: 873,
+    },
+  })),
 }));
 
 const token = "header.payload.signature";

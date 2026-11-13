@@ -9,6 +9,7 @@ import {
   PortalError,
   revokeKey,
 } from "./portal-api";
+import { Usage } from "./usage";
 
 interface PortalProps {
   token: string;
@@ -85,6 +86,7 @@ function KeyPortal({ token, onUnauthenticated }: PortalProps) {
 
   return (
     <div className="portal">
+      <Usage token={token} onUnauthenticated={onUnauthenticated} />
       <CreateKeyForm
         token={token}
         onCreated={created}

@@ -701,6 +701,19 @@ restore old key data or secrets after a session transition. Component/client tes
 cover these boundaries; real-browser verification remains a separate M4 rollout
 task.
 
+The current monthly usage panel reads `/api/portal/usage` on portal load and on
+**Refresh usage**, never from a browser-maintained counter. It displays the
+server's UTC period start/reset, billable calls out of 1,000 and remaining calls
+for the owner across all keys. There is no polling or per-key meter. Failed reads
+replace the values with an unavailable/retry state, not zero. Exhaustion explains
+that free key management and matching previously billed retries remain available
+under normal controls. Revocation does not subtract prior usage. Session changes
+ignore late usage responses; a live JWT 401 follows the existing logout path.
+`apps/web/src/usage.test.tsx` covers rendered server fixtures, explicit refresh,
+rollover, exhaustion, failures and stale responses; these mocked component tests
+are not accounting evidence. Real HTTP meter agreement is proved by
+`apps/api/tests/http-accounting.test.ts` (T16 / [#100](https://github.com/PavelDobranov/gethookd-assignment/issues/100)).
+
 ### HTTP concurrency and recovery proofs
 
 `apps/api/tests/http-accounting.test.ts` runs two independent API apps/pools

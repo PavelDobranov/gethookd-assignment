@@ -11,6 +11,7 @@ vi.mock("./portal-api", async (original) => ({
   listKeys: vi.fn(),
   createKey: vi.fn(),
   revokeKey: vi.fn(),
+  getUsage: vi.fn(),
 }));
 const metadata: KeyMetadata = {
   id: "key-id",
@@ -43,6 +44,15 @@ async function selectAndCreate() {
 }
 beforeEach(() => {
   vi.mocked(api.listKeys).mockResolvedValue(empty);
+  vi.mocked(api.getUsage).mockResolvedValue({
+    data: {
+      period_start: "2026-06-01T00:00:00.000Z",
+      period_end: "2026-07-01T00:00:00.000Z",
+      billable_calls: 127,
+      quota: 1000,
+      remaining: 873,
+    },
+  });
   vi.mocked(api.createKey).mockResolvedValue({ data: metadata, secret });
   sessionStorage.clear();
   localStorage.clear();
@@ -228,6 +238,8 @@ it("confirms permanent revocation, cancels without a request, and refreshes only
   expect(screen.queryByRole("button", { name: `Revoke ${metadata.prefix}` })).toBeNull();
   expect(screen.queryByRole("button", { name: /reactivate/i })).toBeNull();
   expect(api.listKeys).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("127 / 1000")).toBeDefined();
+  expect(api.getUsage).toHaveBeenCalledTimes(1);
 });
 
 it.each(["server", "network", "not_found"] as const)(
