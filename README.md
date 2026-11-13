@@ -572,6 +572,27 @@ last-used/revocation timestamps remain nullable. Repeated migrations and seeding
 preserve existing metadata, including revocation, without reactivation. Managed
 HTTP endpoints are not mounted yet.
 
+The Express-independent operations in `src/api-keys/lifecycle.ts` accept trusted
+server authority (a JWT-authenticated owner or a validated API-key identity).
+They issue `ghk_` plus base64url-encoded 32 cryptographically random bytes, hash
+the full credential with SHA-256 and return the secret only on creation. Public
+prefixes are the first 12 characters; collisions are allowed and prefixes never
+authenticate or identify a key. List/revoke results allowlist metadata only.
+Scopes are fixed at issuance: API-key delegation requires `keys:manage` and may
+not grant scopes the caller lacks; JWT owners may select either/both explicitly.
+Lists include revoked keys, ordered by creation descending then UUID ascending,
+with limit 20 (1–100), offset 0 and `has_more`. Owner-scoped permanent revocation
+is idempotent, preserves the original timestamp and permits self-revocation;
+missing and foreign IDs both return no result. There is no secret recovery,
+metadata editing or automatic creation retry. Lost creation results require
+listing/revoking the orphan and issuing another key.
+
+`validateApiKeyIdentity` re-reads the full hash and current revocation, returning
+key ID, owner and scopes without caching authorization. The existing
+`validateApiKey` owner-only shape is retained; revoked credentials now fail on
+the next lookup. Last-used updates and HTTP scope/admission enforcement belong
+to the shared control boundary, not these standalone lookup operations.
+
 ### Repeat-safe world and demo seeding
 
 After migrations, run `npm run db:seed -w @gethookd/api`. Public local credentials
