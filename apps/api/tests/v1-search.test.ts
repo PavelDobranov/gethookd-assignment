@@ -1,18 +1,20 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
-import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, expect, inject, it } from "vitest";
+import { sql } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
 
 import { hashApiKey } from "../src/api-keys/index.js";
 import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v1_search_test";
 const connection = createDatabase(url.href);
-const key = "public-v1-search-test-key";
+let key: string;
+let caseNumber = 0;
 let server: Server;
 let origin: string;
 const brandId = 91001;
@@ -27,8 +29,6 @@ beforeAll(async () => {
   }
   await initializeDatabase(url.href);
   await connection.db.delete(ads);
-  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
-  await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
   await connection.db.insert(brands).values([
     { id: brandId, name: "Search Brand" },
     { id: otherBrand, name: "Other Brand" },
@@ -59,6 +59,19 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   origin = `http://127.0.0.1:${address.port}`;
+});
+
+// Fresh identities isolate allowance/quota state; continuations retain one key.
+beforeEach(async () => {
+  key = `public-v1-search-test-key-${++caseNumber}`;
+  const [owner] = await connection.db
+    .insert(users)
+    .values({
+      username: key,
+      passwordHash: "unused-rest-fixture-hash",
+    })
+    .returning({ id: users.id });
+  await connection.db.insert(apiKeys).values(apiKeyFixture(owner.id, hashApiKey(key), key.slice(0, 12)));
 });
 
 afterAll(async () => {

@@ -1,31 +1,17 @@
 import { type RequestHandler, Router } from "express";
 
-import { validateApiKey } from "../../api-keys/index.js";
+import type { KeyHandler, KeyResponse } from "../../api-keys/index.js";
 import type { createDatabase } from "../../db/client.js";
-import { disableCaching } from "../../shared/middleware/disable-caching.js";
+import { prepareBilling, sendBillableResult } from "../../usage/index.js";
 import { niches } from "../model.js";
 import { CursorError, type CursorState, createCursorCodec } from "./cursor.js";
-import { handleErrors, sendError } from "./errors.js";
+import { sendError } from "./errors.js";
 import { normalizeParameters, parseParameters, validateParameters } from "./parameters.js";
 import { queryAds } from "./query.js";
 import { getAd, mapAdSummary } from "./resources.js";
 import { readFirstPage } from "./visibility.js";
 
-function createAuthenticateHandler(db: ReturnType<typeof createDatabase>["db"]): RequestHandler {
-  return async function authenticate(req, res, next) {
-    const credentials = req.rawHeaders.filter(
-      (_, index) => index % 2 === 0 && req.rawHeaders[index]?.toLowerCase() === "authorization",
-    );
-    const match = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/i.exec(req.headers.authorization ?? "");
-    if (credentials.length !== 1 || !match || !(await validateApiKey(db, match[1]))) {
-      sendError(res, "UNAUTHENTICATED");
-      return;
-    }
-    next();
-  };
-}
-
-const validatePath: RequestHandler = (req, res, next) => {
+export const validatePath: RequestHandler = (req, res, next) => {
   try {
     decodeURI(req.path);
   } catch {
@@ -54,8 +40,8 @@ const handleGetNiches: RequestHandler = (req, res, next) => {
   res.json({ data: niches.map(({ slug, name }) => ({ slug, name })) });
 };
 
-function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): RequestHandler<{ id: string }> {
-  return async function handleGetAd(req, res, next) {
+function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): KeyHandler<{ id: string }> {
+  return async function handleGetAd(req, res: KeyResponse, next) {
     if (req.method !== "GET") {
       next();
       return;
@@ -75,18 +61,21 @@ function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): Reques
       ]);
       return;
     }
+    const billing = await prepareBilling(db, req, res, { operation: "v1.detail", id: req.params.id });
+    if (!billing) return;
     const ad = await getAd(db, req.params.id);
     if (!ad) {
       sendError(res, "AD_NOT_FOUND");
       return;
     }
-    res.json({ data: ad });
+    const body = JSON.stringify({ data: ad });
+    await sendBillableResult(db, res, body, billing.binding);
   };
 }
 
-function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursorSecret: string): RequestHandler {
+function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursorSecret: string): KeyHandler {
   const codec = createCursorCodec({ secret: cursorSecret, now: () => Date.now() });
-  return async function handleSearch(req, res, next) {
+  return async function handleSearch(req, res: KeyResponse, next) {
     if (req.method !== "GET") {
       next();
       return;
@@ -117,6 +106,11 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
       return;
     }
     const { query, limit } = normalized.value;
+    const billing = await prepareBilling(db, req, res, {
+      operation: "v1.search",
+      parameters: { query, limit, cursor: validated.value.cursor },
+    });
+    if (!billing) return;
     const page = original
       ? { snapshot: original.snapshot, data: await queryAds(db, query, limit, original) }
       : await readFirstPage(db, (tx) => queryAds(tx, query, limit));
@@ -137,7 +131,7 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
                 : { rank: last.impressionRank, id: last.id },
           })
         : null;
-    res.json({
+    const body = JSON.stringify({
       data: rows.map((row) => mapAdSummary(row, now)),
       applied_filters: {
         q: query.q,
@@ -152,12 +146,9 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
       next_cursor: nextCursor,
       cursor_expires_at: new Date(expiresAt).toISOString(),
     });
+    await sendBillableResult(db, res, body, billing.binding);
   };
 }
-
-const handleNotFound: RequestHandler = (_req, res) => {
-  sendError(res, "NOT_FOUND");
-};
 
 export function createRouter({
   db,
@@ -168,14 +159,11 @@ export function createRouter({
 }) {
   const router = Router();
 
-  router.use(disableCaching);
-  router.use(createAuthenticateHandler(db));
-  router.use(validatePath);
-  router.get("/niches", handleGetNiches);
-  router.get("/ads", createSearchHandler(db, cursorSecret));
-  router.get("/ads/:id", createGetAdHandler(db));
-  router.use(handleNotFound);
-  router.use(handleErrors);
+  // Register all methods so Express cannot synthesize an OPTIONS success when
+  // leaving this child router; handlers pass non-GET requests to the root fallback.
+  router.all("/niches", handleGetNiches);
+  router.all("/ads", createSearchHandler(db, cursorSecret));
+  router.all("/ads/:id", createGetAdHandler(db));
 
   return router;
 }

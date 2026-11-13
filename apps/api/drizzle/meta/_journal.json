@@ -22,6 +22,27 @@
       "when": 1794512115496,
       "tag": "0002_flimsy_whizzer",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794561516471,
+      "tag": "0003_white_tattoo",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794563779373,
+      "tag": "0004_nifty_whizzer",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794564529051,
+      "tag": "0005_known_mariko_yashida",
+      "breakpoints": true
     }
   ]
 }

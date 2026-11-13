@@ -1,5 +1,17 @@
 import { sql } from "drizzle-orm";
-import { check, customType, date, integer, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import {
+  check,
+  customType,
+  date,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 import { type Ad, adFormats, adStatuses, niches } from "../ads/index.js";
 
@@ -73,10 +85,62 @@ export const ads = pgTable(
   ],
 );
 
-export const apiKeys = pgTable("api_keys", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id),
-  keyHash: text("key_hash").notNull().unique(),
-});
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    keyHash: text("key_hash").notNull().unique(),
+    prefix: text("prefix").notNull(),
+    scopes: text("scopes").array().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    rateAdmissions: timestamp("rate_admissions", { withTimezone: true, mode: "string" })
+      .array()
+      .notNull()
+      .default(sql`'{}'::timestamptz[]`),
+  },
+  (table) => [
+    check("api_keys_rate_admissions_check", sql`cardinality(${table.rateAdmissions}) <= 60`),
+    check(
+      "api_keys_scopes_check",
+      sql`${table.scopes} = ARRAY['search:read']::text[] OR ${table.scopes} = ARRAY['keys:manage']::text[] OR ${table.scopes} = ARRAY['search:read', 'keys:manage']::text[]`,
+    ),
+  ],
+);
+
+// This aggregate is the authoritative meter, including after binding expiry/revocation.
+export const monthlyUsage = pgTable(
+  "monthly_usage",
+  {
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id),
+    periodStart: date("period_start").notNull(),
+    count: integer("count").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ownerId, table.periodStart] }),
+    check("monthly_usage_count_check", sql`${table.count} BETWEEN 0 AND 1000`),
+  ],
+);
+
+export const billingBindings = pgTable(
+  "billing_bindings",
+  {
+    apiKeyId: uuid("api_key_id")
+      .notNull()
+      .references(() => apiKeys.id),
+    valueHash: text("value_hash").notNull(),
+    fingerprintHash: text("fingerprint_hash").notNull(),
+    settledAt: timestamp("settled_at", { withTimezone: true, mode: "string" }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.apiKeyId, table.valueHash] }),
+    index("billing_bindings_key_expiry_idx").on(table.apiKeyId, table.expiresAt),
+  ],
+);

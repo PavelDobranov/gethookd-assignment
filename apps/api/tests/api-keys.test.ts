@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, expect, inject, it } from "vitest";
 import { hashApiKey, validateApiKey } from "../src/api-keys/index.js";
 import { createDatabase } from "../src/db/client.js";
 import { apiKeys, users } from "../src/db/schema.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_api_keys_test";
@@ -26,14 +27,14 @@ beforeAll(async () => {
 afterAll(connection.close);
 beforeEach(async () => {
   // This database belongs exclusively to this suite in the disposable project.
-  await db.delete(apiKeys);
-  await db.delete(users);
+  // Future accounting rows are reset only in this suite's disposable database.
+  await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
   const [owner] = await db
     .insert(users)
     .values({ username: "owner", passwordHash: "test-only-hash" })
     .returning({ id: users.id });
   ownerId = owner.id;
-  await db.insert(apiKeys).values({ userId: ownerId, keyHash: hashApiKey(publicKey) });
+  await db.insert(apiKeys).values(apiKeyFixture(ownerId, hashApiKey(publicKey), "gethookd-publ"));
 });
 
 it("resolves the actual owning user from a hash-only stored key", async () => {
@@ -43,6 +44,12 @@ it("resolves the actual owning user from a hash-only stored key", async () => {
     id: expect.any(String),
     userId: ownerId,
     keyHash: "58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47",
+    prefix: "gethookd-publ",
+    scopes: ["search:read", "keys:manage"],
+    createdAt: expect.any(Date),
+    lastUsedAt: null,
+    revokedAt: null,
+    rateAdmissions: [],
   });
 });
 
@@ -61,7 +68,7 @@ it.each([undefined, null, "", 42, true, [publicKey], { api_key: publicKey }])(
   "rejects missing, empty and non-scalar input (case %#)",
   async (key) => {
     // Even a stored empty-string digest must not authenticate an empty input.
-    await db.insert(apiKeys).values({ userId: ownerId, keyHash: hashApiKey("") });
+    await db.insert(apiKeys).values(apiKeyFixture(ownerId, hashApiKey("")));
     expect(await validateApiKey(db, key)).toBeNull();
   },
 );

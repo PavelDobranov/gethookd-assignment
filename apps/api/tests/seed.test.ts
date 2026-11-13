@@ -32,7 +32,13 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // Only this suite's database in the disposable test project is touched.
-  await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
+  await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
+  expect(
+    (
+      await db.execute(sql`SELECT (SELECT count(*)::int FROM monthly_usage) AS usage,
+    (SELECT count(*)::int FROM billing_bindings) AS bindings`)
+    ).rows,
+  ).toEqual([{ usage: 0, bindings: 0 }]);
 });
 afterAll(close);
 
@@ -237,6 +243,12 @@ it("seeds the complete world and a hash-only key owned by the existing demo user
       id: expect.any(String),
       userId: demo.id,
       keyHash: hashApiKey("gethookd-public-demo-api-key-m2"),
+      prefix: "gethookd-publ",
+      scopes: ["search:read", "keys:manage"],
+      createdAt: expect.any(Date),
+      lastUsedAt: null,
+      revokedAt: null,
+      rateAdmissions: [],
     },
   ]);
   expect(JSON.stringify(await db.select().from(users)) === JSON.stringify([demo])).toBe(true);
@@ -253,8 +265,22 @@ it("preserves changed world rows and keys while restoring missing fixture IDs on
   await db.delete(ads).where(eq(ads.brandId, 300));
   await db.delete(brands).where(eq(brands.id, 300));
   const [changed] = await db.select().from(ads).where(eq(ads.id, first.id));
+  await db.execute(sql`UPDATE api_keys SET prefix = 'changed-prefix', scopes = ARRAY['search:read'],
+    created_at = '2026-01-01T01:02:03.123456Z', last_used_at = '2026-02-01T01:02:03.123456Z',
+    revoked_at = '2026-03-01T01:02:03.123456Z',
+    rate_admissions = ARRAY['2026-03-01T01:02:03.123456Z'::timestamptz]`);
   const keysBefore = await db.select().from(apiKeys);
+  await db.execute(sql`INSERT INTO monthly_usage VALUES (${keysBefore[0].userId}, '2028-02-01', 12)`);
+  await db.execute(sql`INSERT INTO billing_bindings VALUES
+    (${keysBefore[0].id}, 'value-hash', 'fingerprint-hash', '2028-02-29T12:00:00.123456Z', '2028-03-01T12:00:00.123456Z')`);
+  const accounting = () =>
+    db.execute(sql`SELECT
+    (SELECT json_agg(monthly_usage)::text FROM monthly_usage) AS usage,
+    (SELECT json_agg(billing_bindings)::text FROM billing_bindings) AS bindings`);
+  const accountingBefore = (await accounting()).rows;
+  const rawKeysBefore = await db.execute(sql`SELECT row_to_json(api_keys)::text AS record FROM api_keys`);
   await seedDatabase(db);
+  expect((await accounting()).rows).toEqual(accountingBefore);
   expect(await db.select().from(ads).where(eq(ads.id, first.id))).toEqual([changed]);
   expect(await db.select().from(ads).where(eq(ads.id, missing.id))).toEqual([
     { ...missing, insertedXid: expect.stringMatching(/^\d+$/) },
@@ -264,6 +290,9 @@ it("preserves changed world rows and keys while restoring missing fixture IDs on
   ]);
   expect(await db.select().from(brands).where(eq(brands.id, 300))).toEqual([fixtures.brands[299]]);
   expect(await db.select().from(apiKeys)).toEqual(keysBefore);
+  expect((await db.execute(sql`SELECT row_to_json(api_keys)::text AS record FROM api_keys`)).rows).toEqual(
+    rawKeysBefore.rows,
+  );
   expect((await db.select().from(ads)).length).toBe(20_000);
 });
 
