@@ -27,7 +27,13 @@ describe("MCP server", () => {
     const started = await startApp();
     app = started.app;
     client = new Client({ name: "mcp-test-client", version: "0.0.0" });
-    await client.connect(new StreamableHTTPClientTransport(started.url));
+    // A usable credential lets tool calls reach the dispatch/REST path; the
+    // unauthenticated path is covered in auth-forwarding.test.ts.
+    await client.connect(
+      new StreamableHTTPClientTransport(started.url, {
+        requestInit: { headers: { Authorization: "Bearer key.TESTCLIENT" } },
+      }),
+    );
   });
 
   afterAll(async () => {
@@ -36,7 +42,12 @@ describe("MCP server", () => {
   });
 
   it("initializes a server instance", () => {
-    expect(createMcpServer(createApiClient({ baseUrl: "http://127.0.0.1:1" }))).toBeDefined();
+    expect(
+      createMcpServer(createApiClient({ baseUrl: "http://127.0.0.1:1" }), {
+        ok: true,
+        authorization: "Bearer key.INIT",
+      }),
+    ).toBeDefined();
   });
 
   it("exposes exactly the three expected tools", async () => {
@@ -136,7 +147,8 @@ describe("list_niches HTTP integration", () => {
   beforeAll(async () => {
     upstream = createServer((req, res) => {
       requests.push(`${req.method} ${req.url}`);
-      expect(req.headers.authorization).toBeUndefined();
+      // The caller's credential is forwarded unchanged on every REST request.
+      expect(req.headers.authorization).toBe("Bearer key.HTTPBOUND");
       res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
@@ -144,7 +156,11 @@ describe("list_niches HTTP integration", () => {
     const started = await startApp(createApiClient({ baseUrl }));
     app = started.app;
     client = new Client({ name: "http-boundary-client", version: "0.0.0" });
-    await client.connect(new StreamableHTTPClientTransport(started.url));
+    await client.connect(
+      new StreamableHTTPClientTransport(started.url, {
+        requestInit: { headers: { Authorization: "Bearer key.HTTPBOUND" } },
+      }),
+    );
   });
 
   afterAll(async () => {

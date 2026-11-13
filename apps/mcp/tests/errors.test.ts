@@ -47,6 +47,9 @@ describe.each(["2025-11-25", "2026-07-28"])("tool errors over %s", (version) => 
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
+        // A usable credential so dispatch, validation and REST mapping run; the
+        // missing-credential path is covered in auth-forwarding.test.ts.
+        Authorization: "Bearer key.ERRORS",
         "MCP-Protocol-Version": version,
         "Mcp-Method": "tools/call",
         "Mcp-Name": params.name,

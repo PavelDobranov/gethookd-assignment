@@ -79,7 +79,10 @@ describe("get_ad protocol to HTTP boundary", () => {
     await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
     client = new Client({ name: "get-ad-client", version: "0.0.0" });
     await client.connect(
-      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`)),
+      new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`),
+        { requestInit: { headers: { Authorization: "Bearer key.FORWARD" } } },
+      ),
     );
     expect(requests).toEqual([]);
   });
@@ -121,7 +124,7 @@ describe("get_ad protocol to HTTP boundary", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ method: "GET", path: "/api/v1/ads/ad_001" });
     expect(requests[0].headers["idempotency-key"]).toBeUndefined();
-    expect(requests[0].headers.authorization).toBeUndefined();
+    expect(requests[0].headers.authorization).toBe("Bearer key.FORWARD");
   });
 
   it.each([

@@ -26,16 +26,16 @@ afterEach(async () => {
 });
 
 describe("API HTTP boundary", () => {
-  it("makes exactly one unauthenticated GET and preserves valid JSON including extra fields", async () => {
+  it("makes exactly one GET forwarding the caller's credential and preserves valid JSON including extra fields", async () => {
     const requests: string[] = [];
     const body = { data: [{ slug: "skin-care", name: "Skin care", extra: true }], meta: { version: 1 } };
     const baseUrl = await fixture((req, res) => {
       requests.push(`${req.method} ${req.url}`);
-      expect(req.headers.authorization).toBeUndefined();
+      expect(req.headers.authorization).toBe("Bearer key.CLIENT");
       res.end(JSON.stringify(body));
     });
 
-    const result = await createApiClient({ baseUrl }).listNiches();
+    const result = await createApiClient({ baseUrl }).listNiches("Bearer key.CLIENT");
 
     expect(result).toEqual({ isError: false, body });
     expect(requests).toEqual(["GET /api/v1/niches"]);
@@ -58,7 +58,7 @@ describe("API HTTP boundary", () => {
       res.writeHead(status).end(JSON.stringify(body));
     });
 
-    expect(await createApiClient({ baseUrl }).listNiches()).toEqual({ isError: true, body });
+    expect(await createApiClient({ baseUrl }).listNiches("Bearer key.CLIENT")).toEqual({ isError: true, body });
     expect(requests).toBe(1);
   });
 
@@ -78,7 +78,7 @@ describe("API HTTP boundary", () => {
       res.writeHead(status).end(typeof body === "string" ? body : JSON.stringify(body));
     });
 
-    const result = await createApiClient({ baseUrl }).listNiches();
+    const result = await createApiClient({ baseUrl }).listNiches("Bearer key.CLIENT");
 
     expect(result.isError).toBe(true);
     expect(result.body).toHaveProperty("error.code", "INTERNAL_ERROR");
@@ -97,7 +97,7 @@ describe("API HTTP boundary", () => {
       res.writeHead(302, { Location: destination }).end();
     });
 
-    const result = await createApiClient({ baseUrl }).listNiches();
+    const result = await createApiClient({ baseUrl }).listNiches("Bearer key.CLIENT");
 
     expect(result.isError).toBe(true);
     expect(requests).toBe(1);
@@ -115,7 +115,7 @@ describe("API HTTP boundary", () => {
       }
     });
 
-    const result = await createApiClient({ baseUrl, timeoutMs: 100 }).listNiches();
+    const result = await createApiClient({ baseUrl, timeoutMs: 100 }).listNiches("Bearer key.CLIENT");
 
     expect(result.isError).toBe(true);
     expect(result.body).toHaveProperty("error.code", "INTERNAL_ERROR");
@@ -127,7 +127,7 @@ describe("API HTTP boundary", () => {
 
   it("sanitizes connection failures", async () => {
     const baseUrl = await fixture((_req, res) => res.destroy(new Error("secret internals")));
-    const result = await createApiClient({ baseUrl }).listNiches();
+    const result = await createApiClient({ baseUrl }).listNiches("Bearer key.CLIENT");
     expect(result.isError).toBe(true);
     expect(result.body).toHaveProperty("error.code", "INTERNAL_ERROR");
     expect(JSON.stringify(result)).not.toContain(baseUrl);
@@ -176,7 +176,7 @@ describe("API HTTP boundary", () => {
       res.end(JSON.stringify(body));
     });
 
-    expect(await createApiClient({ baseUrl }).getAd({ id })).toEqual({ isError: false, body });
+    expect(await createApiClient({ baseUrl }).getAd({ id }, "Bearer key.CLIENT")).toEqual({ isError: false, body });
     expect(requests).toEqual([`GET ${path}`]);
   });
 
@@ -204,7 +204,10 @@ describe("API HTTP boundary", () => {
     });
 
     expect(
-      await createApiClient({ baseUrl }).searchAds({ cursor: "v1.opaque_token-A", idempotency_key: "Page:1" }),
+      await createApiClient({ baseUrl }).searchAds(
+        { cursor: "v1.opaque_token-A", idempotency_key: "Page:1" },
+        "Bearer key.CLIENT",
+      ),
     ).toEqual({ isError: false, body });
     expect(requests).toEqual(["GET /api/v1/ads?cursor=v1.opaque_token-A"]);
   });
@@ -224,7 +227,7 @@ describe("API HTTP boundary", () => {
       expect(req.headers["idempotency-key"]).toBeUndefined();
       res.end(JSON.stringify(body));
     });
-    expect(await createApiClient({ baseUrl }).searchAds({})).toEqual({ isError: false, body });
+    expect(await createApiClient({ baseUrl }).searchAds({}, "Bearer key.CLIENT")).toEqual({ isError: false, body });
     expect(path).toBe("/api/v1/ads");
   });
 

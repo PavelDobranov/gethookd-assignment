@@ -67,7 +67,10 @@ describe("search_ads protocol to HTTP boundary", () => {
     await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
     client = new Client({ name: "search-ads-client", version: "0.0.0" });
     await client.connect(
-      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`)),
+      new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`),
+        { requestInit: { headers: { Authorization: "Bearer key.FORWARD" } } },
+      ),
     );
     expect(requests).toEqual([]);
   });
@@ -142,7 +145,7 @@ describe("search_ads protocol to HTTP boundary", () => {
       ["limit", "2"],
     ]);
     expect(request.headers["idempotency-key"]).toBe(args.idempotency_key);
-    expect(request.headers.authorization).toBeUndefined();
+    expect(request.headers.authorization).toBe("Bearer key.FORWARD");
   });
 
   it("keeps literal keyword text and valid Unicode code-point bounds unchanged", async () => {
