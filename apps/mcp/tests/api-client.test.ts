@@ -177,6 +177,54 @@ describe("API HTTP boundary", () => {
     expect(requests).toEqual([`GET ${path}`]);
   });
 
+  it("sends cursor-only search without inherited-filter defaults and keeps identity in its header", async () => {
+    const requests: string[] = [];
+    const body = {
+      data: [],
+      applied_filters: {
+        q: "original",
+        niche: ["skincare"],
+        format: null,
+        status: null,
+        started_after: null,
+        brand_id: 7,
+      },
+      sort: "impressions",
+      limit: 20,
+      next_cursor: null,
+      cursor_expires_at: "2025-01-01T00:30:00.000Z",
+    };
+    const baseUrl = await fixture((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      expect(req.headers["idempotency-key"]).toBe("Page:1");
+      res.end(JSON.stringify(body));
+    });
+
+    expect(
+      await createApiClient({ baseUrl }).searchAds({ cursor: "v1.opaque_token-A", idempotency_key: "Page:1" }),
+    ).toEqual({ isError: false, body });
+    expect(requests).toEqual(["GET /api/v1/ads?cursor=v1.opaque_token-A"]);
+  });
+
+  it("omits all unsupplied search fields and generates no billing identity", async () => {
+    let path: string | undefined;
+    const body = {
+      data: [],
+      applied_filters: { q: "", niche: [], format: null, status: null, started_after: null, brand_id: null },
+      sort: "newest",
+      limit: 20,
+      next_cursor: null,
+      cursor_expires_at: "2025-01-01T00:30:00.000Z",
+    };
+    const baseUrl = await fixture((req, res) => {
+      path = req.url;
+      expect(req.headers["idempotency-key"]).toBeUndefined();
+      res.end(JSON.stringify(body));
+    });
+    expect(await createApiClient({ baseUrl }).searchAds({})).toEqual({ isError: false, body });
+    expect(path).toBe("/api/v1/ads");
+  });
+
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 30_001])("rejects invalid timeout %s", (timeoutMs) => {
     expect(() => createApiClient({ baseUrl: "http://localhost:3000", timeoutMs })).toThrow("API timeout");
   });

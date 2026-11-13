@@ -6,24 +6,56 @@ const nichesSchema = z.looseObject({
   data: z.array(z.looseObject({ slug: z.string(), name: z.string() })),
 });
 
+const adSummarySchema = z.looseObject({
+  id: z.string().min(1),
+  brand_id: z.number().int().min(1).max(2_147_483_647),
+  brand_name: z.string(),
+  headline: z.string(),
+  niche: z.string(),
+  format: z.enum(["image", "video", "carousel"]),
+  status: z.enum(["active", "inactive"]),
+  start_date: z.iso.date(),
+  days_active: z.number().int(),
+  impression_rank: z.number().int().positive().nullable(),
+});
+
 const adDetailSchema = z.looseObject({
-  data: z.looseObject({
-    id: z.string().min(1),
-    brand_id: z.number().int().min(1).max(2_147_483_647),
-    brand_name: z.string(),
-    headline: z.string(),
-    niche: z.string(),
-    format: z.enum(["image", "video", "carousel"]),
-    status: z.enum(["active", "inactive"]),
-    start_date: z.iso.date(),
-    days_active: z.number().int(),
-    impression_rank: z.number().int().positive().nullable(),
+  data: adSummarySchema.extend({
     body_text: z.string(),
     end_date: z.iso.date().nullable(),
     countries: z.array(z.string().regex(/^[A-Z]{2}$/)),
     discovered_at: z.iso.datetime(),
   }),
 });
+
+const searchResponseSchema = z.looseObject({
+  data: z.array(adSummarySchema).max(100),
+  applied_filters: z.looseObject({
+    q: z.string(),
+    niche: z.array(z.string()),
+    format: z.enum(["image", "video", "carousel"]).nullable(),
+    status: z.enum(["active", "inactive"]).nullable(),
+    started_after: z.iso.date().nullable(),
+    brand_id: z.number().int().min(1).max(2_147_483_647).nullable(),
+  }),
+  sort: z.enum(["newest", "impressions"]),
+  limit: z.number().int().min(1).max(100),
+  next_cursor: z.string().min(1).max(4096).nullable(),
+  cursor_expires_at: z.iso.datetime(),
+});
+
+export type SearchAdsInput = {
+  q?: string;
+  niche?: string[];
+  format?: "image" | "video" | "carousel";
+  status?: "active" | "inactive";
+  started_after?: string;
+  brand_id?: number;
+  sort?: "newest" | "impressions";
+  limit?: number;
+  cursor?: string;
+  idempotency_key?: string;
+};
 
 const errorSchema = z.looseObject({
   error: z.looseObject({
@@ -49,6 +81,7 @@ export type ApiClient = {
   readonly baseUrl: string;
   listNiches(): Promise<ApiResult<z.infer<typeof nichesSchema>>>;
   getAd(input: { id: string; idempotency_key?: string }): Promise<ApiResult<z.infer<typeof adDetailSchema>>>;
+  searchAds(input: SearchAdsInput): Promise<ApiResult<z.infer<typeof searchResponseSchema>>>;
 };
 
 function operationalError(code: string, message: string): ApiResult<never> {
@@ -147,6 +180,19 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
     getAd({ id, idempotency_key }) {
       const segment = id === "." || id === ".." ? id.replaceAll(".", "%2E") : encodeURIComponent(id);
       return get(`/api/v1/ads/${segment}`, adDetailSchema, idempotency_key);
+    },
+    searchAds({ idempotency_key, ...filters }) {
+      const query = new URLSearchParams();
+      for (const [name, value] of Object.entries(filters)) {
+        if (value === undefined) continue;
+        if (Array.isArray(value)) {
+          for (const niche of value) query.append(name, niche);
+        } else {
+          query.append(name, String(value));
+        }
+      }
+      const suffix = query.size === 0 ? "" : `?${query}`;
+      return get(`/api/v1/ads${suffix}`, searchResponseSchema, idempotency_key);
     },
   };
 }
