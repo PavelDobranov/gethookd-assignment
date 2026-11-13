@@ -12,8 +12,9 @@ import { signToken } from "../src/auth/jwt.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import type { ValidationDetail } from "../src/shared/http-errors.js";
 import { readUsage } from "../src/usage/index.js";
-import { callTool, type ToolOutcome } from "./helpers/mcp-client.js";
+import { callTool, connectMcpClient, type ToolOutcome } from "./helpers/mcp-client.js";
 
 // Mixed-channel accounting through the real HTTP boundaries: a real MCP client
 // talks to a real MCP server, which forwards each caller's Bearer credential and
@@ -39,6 +40,11 @@ const updatedFreshHeadline = "Fresh read updated headline";
 const searchKeyA = "public-mcp-controls-search-a-key";
 const searchKeyB = "public-mcp-controls-search-b-key";
 const manageKey = "public-mcp-controls-keys-manage-key";
+// Dedicated owners keep the shared-control fixtures isolated: the allowance owner's
+// key is driven to its per-key rate limit and the quota owner's meter is driven to
+// exhaustion without perturbing the accounting assertions above.
+const allowanceKey = "public-mcp-controls-allowance-key";
+const quotaKey = "public-mcp-controls-quota-key";
 
 let restServer: Server;
 let restOrigin: string;
@@ -48,6 +54,9 @@ let ownerId: string;
 let searchKeyAId: string;
 let searchKeyBId: string;
 let sessionToken: string;
+let allowanceOwnerId: string;
+let allowanceKeyId: string;
+let quotaOwnerId: string;
 
 async function insertKey(userId: string, secret: string, scopes: string[]): Promise<string> {
   const [row] = await connection.db
@@ -106,6 +115,20 @@ beforeAll(async () => {
   await insertKey(ownerId, manageKey, ["keys:manage"]);
   sessionToken = await signToken(ownerId, jwtSecret);
 
+  const [allowanceOwner] = await connection.db
+    .insert(users)
+    .values({ username: "mcp-controls-allowance-owner", passwordHash: "unused-rest-fixture-hash" })
+    .returning({ id: users.id });
+  allowanceOwnerId = allowanceOwner.id;
+  allowanceKeyId = await insertKey(allowanceOwnerId, allowanceKey, ["search:read"]);
+
+  const [quotaOwner] = await connection.db
+    .insert(users)
+    .values({ username: "mcp-controls-quota-owner", passwordHash: "unused-rest-fixture-hash" })
+    .returning({ id: users.id });
+  quotaOwnerId = quotaOwner.id;
+  await insertKey(quotaOwnerId, quotaKey, ["search:read"]);
+
   restServer = createApp({ db: connection.db, jwtSecret }).listen(0, "127.0.0.1");
   await once(restServer, "listening");
   restOrigin = `http://127.0.0.1:${(restServer.address() as AddressInfo).port}`;
@@ -140,6 +163,58 @@ function restGet(path: string, key: string, idempotencyKey?: string): Promise<Re
   const headers: Record<string, string> = { Authorization: bearer(key) };
   if (idempotencyKey !== undefined) headers["Idempotency-Key"] = idempotencyKey;
   return fetch(`${restOrigin}${path}`, { headers });
+}
+
+/** A direct v0 read; v0 authenticates with the key as a query parameter, not a Bearer header. */
+function v0Get(key: string): Promise<Response> {
+  return fetch(`${restOrigin}/api/v0/ads?api_key=${encodeURIComponent(key)}`);
+}
+
+/** The owner's current authoritative billable-call count for any owner. */
+const usageFor = async (owner: string) => (await readUsage(connection.db, owner)).data.billable_calls;
+
+/** How many admissions the key's shared per-key allowance window currently holds. */
+async function admissionCount(keyId: string): Promise<number> {
+  const { rows } = await connection.db.execute<{ n: number }>(
+    sql`SELECT coalesce(cardinality(rate_admissions), 0)::int AS n FROM api_keys WHERE id = ${keyId}::uuid`,
+  );
+  return rows[0].n;
+}
+
+/** Empties the key's allowance window so admission counts start from a known zero. */
+function resetAllowance(keyId: string) {
+  return connection.db.execute(
+    sql`UPDATE api_keys SET rate_admissions = ARRAY[]::timestamptz[] WHERE id = ${keyId}::uuid`,
+  );
+}
+
+/** Fills the key's 60-slot allowance window so the next admission is denied with a live wait. */
+function fillAllowance(keyId: string) {
+  return connection.db.execute(
+    sql`UPDATE api_keys SET rate_admissions = array_fill(clock_timestamp(), ARRAY[60]) WHERE id = ${keyId}::uuid`,
+  );
+}
+
+/** Drives the owner's current-month meter to a known count without issuing billable calls. */
+function setMonthlyUsage(ownerId: string, count: number) {
+  return connection.db.execute(sql`
+    INSERT INTO monthly_usage (owner_id, period_start, count)
+    VALUES (${ownerId}::uuid, date_trunc('month', clock_timestamp() AT TIME ZONE 'UTC')::date, ${count})
+    ON CONFLICT (owner_id, period_start) DO UPDATE SET count = ${count}
+  `);
+}
+
+/** The whole-second wait REST embeds in a RATE_LIMITED message, matching its Retry-After header. */
+function rateWait(message: string): number {
+  const match = message.match(/Wait (\d+) seconds/);
+  if (!match) throw new Error(`No wait found in rate-limited message: ${message}`);
+  return Number(match[1]);
+}
+
+/** The error envelope a failed outcome propagated verbatim from REST. */
+function errorEnvelope(outcome: ToolOutcome) {
+  if (!outcome.isError) throw new Error("Expected a failed tool outcome.");
+  return (outcome.body as { error: { code: string; message: string; details: ValidationDetail[] } }).error;
 }
 
 describe("billable reads charge once per channel; free and failed reads never charge", () => {
@@ -315,5 +390,110 @@ describe("header-only propagation, fresh reads and no implicit MCP identity", ()
     expect(second.isError).toBe(false);
     expect(await meter()).toBe(beforeMeter + 2);
     expect(await bindingCount(searchKeyAId)).toBe(beforeBindings);
+  });
+});
+
+describe("mixed v0/v1/MCP traffic consumes one shared per-key allowance", () => {
+  // The allowance is the per-key rate window on the api_keys row. v0 (query-credential),
+  // v1 (Bearer) and MCP (Bearer forwarded to v1) all admit through the same window, so a
+  // valid call on any channel appends exactly one admission to the one key. These tests
+  // drive rate_admissions directly rather than issuing 60 real calls, so they are
+  // deterministic and never sleep or contend for the window with the suites above.
+
+  it("appends exactly one admission per valid call across all three channels", async () => {
+    await resetAllowance(allowanceKeyId);
+    const v0 = await v0Get(allowanceKey);
+    expect(v0.status).toBe(200);
+    const v1 = await restGet(`/api/v1/ads?brand_id=${brandId}`, allowanceKey);
+    expect(v1.status).toBe(200);
+    const mcp = await callTool(mcpUrl, bearer(allowanceKey), "search_ads", { brand_id: brandId });
+    expect(mcp.isError).toBe(false);
+    expect(await admissionCount(allowanceKeyId)).toBe(3);
+  });
+
+  it("charges allowance for free niche calls and admitted errors but not protocol-only exchanges", async () => {
+    await resetAllowance(allowanceKeyId);
+
+    // A protocol-only exchange (connect and discovery) forwards nothing to REST.
+    const client = await connectMcpClient(mcpUrl, bearer(allowanceKey));
+    await client.listTools();
+    await client.close();
+    expect(await admissionCount(allowanceKeyId)).toBe(0);
+
+    const beforeMeter = await usageFor(allowanceOwnerId);
+    const niches = await callTool(mcpUrl, bearer(allowanceKey), "list_niches");
+    expect(niches.isError).toBe(false);
+    const missing = await callTool(mcpUrl, bearer(allowanceKey), "get_ad", { id: missingAdId });
+    expect(missing).toMatchObject({ isError: true, code: "AD_NOT_FOUND" });
+
+    // Both an unbilled free call and an admitted-then-failed read consumed allowance.
+    expect(await admissionCount(allowanceKeyId)).toBe(2);
+    expect(await usageFor(allowanceOwnerId)).toBe(beforeMeter);
+  });
+
+  it("propagates REST's accurate rate wait through MCP without appending an admission", async () => {
+    await fillAllowance(allowanceKeyId);
+    const rest = await restGet(`/api/v1/ads?brand_id=${brandId}`, allowanceKey);
+    expect(rest.status).toBe(429);
+    const restWait = Number(rest.headers.get("retry-after"));
+    const restBody = (await rest.json()) as { error: { code: string; message: string } };
+    expect(restBody.error.code).toBe("RATE_LIMITED");
+    // The Retry-After header and the wait embedded in the body are the one computed value.
+    expect(rateWait(restBody.error.message)).toBe(restWait);
+
+    const mcp = await callTool(mcpUrl, bearer(allowanceKey), "search_ads", { brand_id: brandId });
+    expect(mcp).toMatchObject({ isError: true, code: "RATE_LIMITED" });
+    const mcpWait = rateWait(errorEnvelope(mcp).message);
+    // MCP forwarded REST's live wait; it only shrinks as the window ages between the two
+    // real calls, never grows and is never dropped or fabricated.
+    expect(restWait).toBeGreaterThan(0);
+    expect(restWait - mcpWait).toBeGreaterThanOrEqual(0);
+    expect(restWait - mcpWait).toBeLessThanOrEqual(1);
+
+    // A denied allowance is not a new admission, on either channel.
+    expect(await admissionCount(allowanceKeyId)).toBe(60);
+  });
+});
+
+describe("an exhausted owner quota blocks new billable MCP successes", () => {
+  it("blocks a new billable success with reset guidance while a matching billed retry stays free", async () => {
+    // Bill a retry identity at the quota edge, then let that charge exhaust the quota.
+    await setMonthlyUsage(quotaOwnerId, 999);
+    const retryKey = "quota-free-retry";
+    const billed = await callTool(mcpUrl, bearer(quotaKey), "get_ad", { id: adId, idempotency_key: retryKey });
+    expect(billed.isError).toBe(false);
+    expect(await usageFor(quotaOwnerId)).toBe(1000);
+
+    // A new billable MCP success is refused with QUOTA_EXCEEDED and reset guidance.
+    const blocked = await callTool(mcpUrl, bearer(quotaKey), "get_ad", { id: adId });
+    expect(blocked).toMatchObject({ isError: true, code: "QUOTA_EXCEEDED" });
+    const periodEnd = (await readUsage(connection.db, quotaOwnerId)).data.period_end;
+    const error = errorEnvelope(blocked);
+    expect(error.message).toContain(`resets at ${periodEnd}`);
+    expect(error.details[0]).toMatchObject({
+      parameter: "quota",
+      reason: "monthly_quota_exceeded",
+      suggestion: periodEnd,
+    });
+    expect(await usageFor(quotaOwnerId)).toBe(1000);
+
+    // The existing matching billed retry still deduplicates for free.
+    const retry = await callTool(mcpUrl, bearer(quotaKey), "get_ad", { id: adId, idempotency_key: retryKey });
+    expect(retry.isError).toBe(false);
+    expect(await usageFor(quotaOwnerId)).toBe(1000);
+  });
+
+  it("still passes free and read checks under an exhausted quota", async () => {
+    await setMonthlyUsage(quotaOwnerId, 1000);
+
+    // A free operation is never metered, so an exhausted quota never blocks it.
+    const niches = await callTool(mcpUrl, bearer(quotaKey), "list_niches");
+    expect(niches.isError).toBe(false);
+
+    // The read executes before settlement, so a missing ad fails its own read check,
+    // not the quota check, and never charges.
+    const missing = await callTool(mcpUrl, bearer(quotaKey), "get_ad", { id: missingAdId });
+    expect(missing).toMatchObject({ isError: true, code: "AD_NOT_FOUND" });
+    expect(await usageFor(quotaOwnerId)).toBe(1000);
   });
 });
