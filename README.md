@@ -569,8 +569,8 @@ Do not delete keys or invent prefixes to bypass that diagnostic.
 exactly one or both of `search:read`, `keys:manage`, in that order, without
 unknown/duplicate values or an elevated default. Creation time remains required;
 last-used/revocation timestamps remain nullable. Repeated migrations and seeding
-preserve existing metadata, including revocation, without reactivation. Managed
-HTTP endpoints are not mounted yet.
+preserve existing metadata, including revocation, without reactivation. JWT portal
+key endpoints are mounted; API-key management endpoints remain a later slice.
 
 The Express-independent operations in `src/api-keys/lifecycle.ts` accept trusted
 server authority (a JWT-authenticated owner or a validated API-key identity).
@@ -592,6 +592,47 @@ key ID, owner and scopes without caching authorization. The existing
 `validateApiKey` owner-only shape is retained; revoked credentials now fail on
 the next lookup. Last-used updates and HTTP scope/admission enforcement belong
 to the shared control boundary, not these standalone lookup operations.
+
+### JWT portal key management
+
+The portal key API uses the existing login JWT, never an API key. All responses
+(including errors) are `Cache-Control: no-store`; these calls do not consume
+API-key admissions or update key last-used timestamps.
+
+```sh
+# TOKEN is the JWT returned by POST /api/auth/login.
+curl -X POST http://localhost:3000/api/portal/keys \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"scopes":["search:read"]}'
+curl 'http://localhost:3000/api/portal/keys?limit=20&offset=0' \
+  -H "Authorization: Bearer $TOKEN"
+curl -X DELETE "http://localhost:3000/api/portal/keys/$KEY_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+POST returns 201 `{ "data": <metadata>, "secret": "<key>" }` exactly once;
+GET returns `{ "data": [<metadata>], "limit": 20, "offset": 0, "has_more": false }`;
+DELETE returns an empty 204, including repeat revocation. Metadata is exactly
+`id`, `prefix`, `scopes`, `created_at`, `last_used_at`, `revoked_at`.
+Scopes must be explicitly nonempty, distinct and allowed; no owner/name/extra
+fields are accepted. Creation accepts JSON up to 16 KB. Unknown query parameters
+are rejected; list limit/offset accept decimal digits only (limit 1–100, offset
+a nonnegative safe integer). Invalid UUIDs yield 422; foreign/missing IDs share
+404 `KEY_NOT_FOUND`. Authentication is checked against a live user before parsing.
+There is no automatic POST retry or secret recovery: after a lost response, list
+and revoke the orphan, then explicitly create a replacement. Usage routes and
+the browser management UI are later slices, not exposed here.
+
+`shared/http-errors.ts` supplies the five-field rich envelope (`code`, `message`,
+`next_action`, `retryable`, `details`), reused at this new boundary without
+changing old auth/health errors. Malformed JSON is 400 `MALFORMED_JSON`, oversized
+JSON is 413 `BODY_TOO_LARGE`, validation is 422. Shared scope/key/conflict errors
+are 403/404/409. Quota errors use 403 `QUOTA_EXCEEDED` and the exact UTC reset
+in a detail with parameter `quota`, reason `monthly_quota_exceeded`, empty
+`allowed_values` and reset ISO timestamp as `suggestion`. Rate errors use 429
+`RATE_LIMITED`, retryable true and the same wait in `Retry-After` and guidance.
+These helpers do not yet wire accounting into ad routes. The ad-specific adapter
+preserves existing M3 corrections and codes; raw exceptions are never logged.
 
 ### Durable accounting primitives
 
@@ -924,10 +965,10 @@ The public development fixture is **`gethookd-public-demo-api-key-m2`**, whose
 SHA-256 digest is
 `58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47`.
 It is public, development-only, and not a production secret. Setup and `db:seed`
-insert its hash if missing; the key authenticates `GET /api/v0/ads`. No key
-management HTTP endpoint is available. Future managed
-keys require cryptographically random secrets; these operations add no key management,
-scopes, rate limits or metering.
+insert its hash if missing; the key authenticates `GET /api/v0/ads`. JWT portal
+management now issues cryptographically random managed keys; see the lifecycle
+and portal sections above. The legacy hash lookup itself does not perform scope,
+rate admission or billing enforcement.
 
 ```sh
 npm run test:unit -w @gethookd/api -- tests/api-key-hash.test.ts
