@@ -552,7 +552,7 @@ advisory concerns esbuild's development server, which these generate/migrate
 commands do not launch. Do not expose such a server; no forced downgrade or
 unreviewed dependency override is applied.
 
-### Staged API-key lifecycle storage
+### API-key lifecycle storage
 
 `0003_white_tattoo.sql` adds public `prefix`, `scopes`, `created_at`,
 `last_used_at` and `revoked_at` metadata without changing key IDs, owners or hashes.
@@ -564,12 +564,13 @@ stored or recovered.
 
 An unknown pre-M4 key hash stops migration before DDL with a diagnostic requiring
 human resolution: a truthful secret prefix cannot be recovered from its hash.
-Do not delete keys or invent prefixes to bypass that diagnostic. Prefix/scopes
-remain temporarily nullable to preserve existing insertion shapes during fixture
-adaptation. This is not the completed M4 schema or an authorization fallback:
-existing authentication is unchanged, and lifecycle/scope enforcement and managed
-HTTP endpoints are not implemented by this storage slice. Repeated migrations
-and seeding preserve existing metadata, including revocation, without reactivation.
+Do not delete keys or invent prefixes to bypass that diagnostic.
+`0004_nifty_whizzer.sql` finalizes required prefix/scopes metadata. Scopes must be
+exactly one or both of `search:read`, `keys:manage`, in that order, without
+unknown/duplicate values or an elevated default. Creation time remains required;
+last-used/revocation timestamps remain nullable. Repeated migrations and seeding
+preserve existing metadata, including revocation, without reactivation. Managed
+HTTP endpoints are not mounted yet.
 
 ### Repeat-safe world and demo seeding
 

@@ -73,16 +73,24 @@ export const ads = pgTable(
   ],
 );
 
-export const apiKeys = pgTable("api_keys", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id),
-  keyHash: text("key_hash").notNull().unique(),
-  // Nullable only during the staged M4 fixture migration, not a legacy auth policy.
-  prefix: text("prefix"),
-  scopes: text("scopes").array(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-});
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    keyHash: text("key_hash").notNull().unique(),
+    prefix: text("prefix").notNull(),
+    scopes: text("scopes").array().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "api_keys_scopes_check",
+      sql`${table.scopes} = ARRAY['search:read']::text[] OR ${table.scopes} = ARRAY['keys:manage']::text[] OR ${table.scopes} = ARRAY['search:read', 'keys:manage']::text[]`,
+    ),
+  ],
+);
