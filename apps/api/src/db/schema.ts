@@ -79,4 +79,10 @@ export const apiKeys = pgTable("api_keys", {
     .notNull()
     .references(() => users.id),
   keyHash: text("key_hash").notNull().unique(),
+  // Nullable only during the staged M4 fixture migration, not a legacy auth policy.
+  prefix: text("prefix"),
+  scopes: text("scopes").array(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
 });

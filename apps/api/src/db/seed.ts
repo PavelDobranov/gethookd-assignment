@@ -32,7 +32,12 @@ export async function seedDatabase(db: Database) {
     const [existingKey] = await tx.select({ id: apiKeys.id }).from(apiKeys).where(eq(apiKeys.keyHash, keyHash));
 
     if (!existingKey) {
-      await tx.insert(apiKeys).values({ userId: demo.id, keyHash });
+      await tx.insert(apiKeys).values({
+        userId: demo.id,
+        keyHash,
+        prefix: "gethookd-publ",
+        scopes: ["search:read", "keys:manage"],
+      });
     }
   });
 }

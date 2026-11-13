@@ -22,6 +22,7 @@ beforeAll(async () => {
   try {
     await admin.db.execute(sql`CREATE DATABASE gethookd_world_test`);
     await admin.db.execute(sql`CREATE DATABASE gethookd_world_upgrade`);
+    await admin.db.execute(sql`CREATE DATABASE gethookd_key_upgrade`);
   } finally {
     await admin.close();
   }
@@ -113,6 +114,11 @@ it("has only the intended storage columns and PostgreSQL identity/date/array typ
       ["id", "uuid"],
       ["user_id", "uuid"],
       ["key_hash", "text"],
+      ["prefix", "text"],
+      ["scopes", "_text"],
+      ["created_at", "timestamptz"],
+      ["last_used_at", "timestamptz"],
+      ["revoked_at", "timestamptz"],
     ].map(([column_name, udt_name]) => ({
       table_name: "api_keys",
       column_name,
@@ -285,11 +291,12 @@ it("generates UUID key identities, enforces unique hashes and user references, a
   });
 });
 
-it.each(["id", "user_id", "key_hash"])("rejects NULL api_keys.%s", async (column) => {
+it.each(["id", "user_id", "key_hash", "created_at"])("rejects NULL api_keys.%s", async (column) => {
   const record = {
     id: "00000000-0000-0000-0000-000000000002",
     user_id: ownerId,
     key_hash: "hash",
+    created_at: "2026-10-05T12:00:00Z",
     [column]: null,
   };
   await expect(
@@ -297,6 +304,91 @@ it.each(["id", "user_id", "key_hash"])("rejects NULL api_keys.%s", async (column
       sql`INSERT INTO api_keys SELECT * FROM jsonb_populate_record(NULL::api_keys, ${JSON.stringify(record)}::jsonb)`,
     ),
   ).rejects.toMatchObject({ cause: { code: "23502", column } });
+});
+
+it("rejects unknown M3 legacy hashes atomically, then truthfully backfills the known fixture", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "gethookd-m3-migrations-"));
+  const url = new URL(worldUrl);
+  url.pathname = "/gethookd_key_upgrade";
+  const connection = createDatabase(url.href);
+  try {
+    const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8"));
+    const entries = journal.entries.slice(0, 3);
+    await mkdir(join(directory, "meta"));
+    await writeFile(join(directory, "meta/_journal.json"), JSON.stringify({ ...journal, entries }));
+    for (const entry of entries) {
+      await writeFile(join(directory, `${entry.tag}.sql`), await readFile(`drizzle/${entry.tag}.sql`));
+    }
+    await migrate(connection.db, { migrationsFolder: directory });
+    await connection.db.insert(users).values({ id: ownerId, username: "legacy-owner", passwordHash: "unchanged" });
+    await connection.db.transaction((tx) =>
+      seedWorld(tx, {
+        brands: generateFixtures().brands.slice(0, 1),
+        ads: generateFixtures().ads.slice(0, 1),
+      }),
+    );
+    await connection.db.execute(sql`INSERT INTO api_keys (user_id, key_hash) VALUES
+      (${ownerId}, '58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47'),
+      (${ownerId}, 'unknown-legacy-hash')`);
+    const snapshot = async () => {
+      const records = [];
+      for (const table of ["users", "brands", "ads", "api_keys", "drizzle.__drizzle_migrations"]) {
+        records.push(
+          (
+            await connection.db.execute(
+              sql.raw(
+                `SELECT row_to_json(original)::text AS record FROM (SELECT * FROM ${table} ORDER BY id) original`,
+              ),
+            )
+          ).rows,
+        );
+      }
+      return records;
+    };
+    const before = await snapshot();
+    const {
+      rows: [originalKey],
+    } = await connection.db.execute(sql`
+      SELECT id FROM api_keys WHERE key_hash = '58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47'
+    `);
+    await expect(migrate(connection.db, { migrationsFolder: "drizzle" })).rejects.toMatchObject({
+      cause: { message: "Cannot backfill API key prefixes: unsupported legacy keys require human resolution." },
+    });
+    expect(await snapshot()).toEqual(before);
+    expect(
+      (
+        await connection.db.execute(sql`SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'api_keys' AND table_schema = 'public' ORDER BY ordinal_position`)
+      ).rows,
+    ).toEqual(["id", "user_id", "key_hash"].map((column_name) => ({ column_name })));
+    await connection.db.execute(sql`DELETE FROM api_keys WHERE key_hash = 'unknown-legacy-hash'`);
+    const {
+      rows: [lower],
+    } = await connection.db.execute(sql`SELECT clock_timestamp() AS time`);
+    await migrate(connection.db, { migrationsFolder: "drizzle" });
+    const {
+      rows: [upper],
+    } = await connection.db.execute(sql`SELECT clock_timestamp() AS time`);
+    const [key] = await connection.db.select().from(apiKeys);
+    expect(key).toEqual({
+      id: originalKey.id,
+      userId: ownerId,
+      keyHash: "58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47",
+      prefix: "gethookd-publ",
+      scopes: ["search:read", "keys:manage"],
+      createdAt: expect.any(Date),
+      lastUsedAt: null,
+      revokedAt: null,
+    });
+    expect(key.createdAt.getTime()).toBeGreaterThanOrEqual(new Date(String(lower.time)).getTime());
+    expect(key.createdAt.getTime()).toBeLessThanOrEqual(new Date(String(upper.time)).getTime());
+    expect((await snapshot()).slice(0, 3)).toEqual(before.slice(0, 3));
+    await migrate(connection.db, { migrationsFolder: "drizzle" });
+    expect(await connection.db.select().from(apiKeys)).toEqual([key]);
+  } finally {
+    await connection.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 it("upgrades M1 and a populated M2 database without changing original records or replaying migrations", async () => {
@@ -339,10 +431,11 @@ it("upgrades M1 and a populated M2 database without changing original records or
     expect(originalAds.rows).toHaveLength(20_000);
     const originalBrands = await connection.db.select().from(brands).orderBy(brands.id);
     const [owner] = before;
-    const originalKeys = await connection.db
-      .insert(apiKeys)
-      .values({ userId: owner.id, keyHash: "m2-key-hash" })
-      .returning();
+    const originalKeys = await connection.db.execute(sql`
+      INSERT INTO api_keys (user_id, key_hash)
+      VALUES (${owner.id}, '58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47')
+      RETURNING id, user_id, key_hash
+    `);
     const {
       rows: [lower],
     } = await connection.db.execute(sql`SELECT pg_current_xact_id()::text AS xid`);
@@ -353,7 +446,22 @@ it("upgrades M1 and a populated M2 database without changing original records or
     );
     expect(await readOriginalAds()).toMatchObject({ rows: originalAds.rows });
     expect(await connection.db.select().from(brands).orderBy(brands.id)).toEqual(originalBrands);
-    expect(await connection.db.select().from(apiKeys)).toEqual(originalKeys);
+    expect((await connection.db.execute(sql`SELECT id, user_id, key_hash FROM api_keys`)).rows).toEqual(
+      originalKeys.rows,
+    );
+    const keysAfter = await connection.db.select().from(apiKeys);
+    expect(keysAfter).toEqual([
+      {
+        id: originalKeys.rows[0].id,
+        userId: owner.id,
+        keyHash: originalKeys.rows[0].key_hash,
+        prefix: "gethookd-publ",
+        scopes: ["search:read", "keys:manage"],
+        createdAt: expect.any(Date),
+        lastUsedAt: null,
+        revokedAt: null,
+      },
+    ]);
     const markers = await connection.db.select({ xid: ads.insertedXid }).from(ads);
     expect(markers).toHaveLength(20_000);
     const uniqueMarkers = [...new Set(markers.map(({ xid }) => xid))];
@@ -386,6 +494,7 @@ it("upgrades M1 and a populated M2 database without changing original records or
     expect(JSON.stringify(await connection.db.select().from(users)) === JSON.stringify(before)).toBe(true);
     expect(await readOriginalAds()).toMatchObject({ rows: originalAds.rows });
     expect(await connection.db.select({ xid: ads.insertedXid }).from(ads)).toEqual(markers);
+    expect(await connection.db.select().from(apiKeys)).toEqual(keysAfter);
   } finally {
     await connection.close();
     await rm(directory, { recursive: true, force: true });

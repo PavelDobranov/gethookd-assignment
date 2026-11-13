@@ -552,6 +552,25 @@ advisory concerns esbuild's development server, which these generate/migrate
 commands do not launch. Do not expose such a server; no forced downgrade or
 unreviewed dependency override is applied.
 
+### Staged API-key lifecycle storage
+
+`0003_white_tattoo.sql` adds public `prefix`, `scopes`, `created_at`,
+`last_used_at` and `revoked_at` metadata without changing key IDs, owners or hashes.
+The known public demo hash receives its literal 12-character prefix
+`gethookd-publ` and scopes `search:read`, `keys:manage`. Its creation timestamp is
+migration time, not recovered historical issuance time; newly seeded keys use
+insertion time. Last-used/revocation timestamps start null. No plaintext key is
+stored or recovered.
+
+An unknown pre-M4 key hash stops migration before DDL with a diagnostic requiring
+human resolution: a truthful secret prefix cannot be recovered from its hash.
+Do not delete keys or invent prefixes to bypass that diagnostic. Prefix/scopes
+remain temporarily nullable to preserve existing insertion shapes during fixture
+adaptation. This is not the completed M4 schema or an authorization fallback:
+existing authentication is unchanged, and lifecycle/scope enforcement and managed
+HTTP endpoints are not implemented by this storage slice. Repeated migrations
+and seeding preserve existing metadata, including revocation, without reactivation.
+
 ### Repeat-safe world and demo seeding
 
 After migrations, run `npm run db:seed -w @gethookd/api`. Public local credentials

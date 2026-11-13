@@ -43,6 +43,11 @@ it("resolves the actual owning user from a hash-only stored key", async () => {
     id: expect.any(String),
     userId: ownerId,
     keyHash: "58d113adf87d5116295338f827abb725a35bf732a31f85d465d9bf2f112fca47",
+    prefix: null,
+    scopes: null,
+    createdAt: expect.any(Date),
+    lastUsedAt: null,
+    revokedAt: null,
   });
 });
 
