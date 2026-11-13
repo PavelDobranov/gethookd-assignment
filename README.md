@@ -664,6 +664,49 @@ in a detail with parameter `quota`, reason `monthly_quota_exceeded`, empty
 The ad-specific adapter
 preserves existing M3 corrections and codes; raw exceptions are never logged.
 
+### Portal HTTP client
+
+`apps/web/src/portal-api.ts` provides explicit `listKeys(token, pagination?)`,
+`createKey(token, scopes)`, `revokeKey(token, id)` and `getUsage(token)` functions.
+They use only relative `/api/portal` URLs, an explicitly supplied JWT, `no-store`,
+`credentials: omit` and redirect rejection. No credentials or owner IDs enter
+query strings; creation sends only selected scopes. The private authentication
+client and tab lifecycle are unchanged. This client does not itself render UI,
+store secrets/tokens, log responses, clear sessions or retry requests.
+
+Responses are validated and allowlisted: metadata/scopes/UTC dates, list
+pagination, reveal-once creation secret/prefix, and coherent monthly meter/reset.
+Revocation accepts only 204 and does not parse JSON. A JWT 401 is distinguished
+from validation, permission, not-found, conflict, server, network and invalid
+response failures. Other rich errors must have a matching status/code and valid
+five-field envelope; server-controlled guidance/details never escape as error
+messages. An unknown creation outcome (network, server failure or invalid
+response) sets `PortalError.creationOutcomeUnknown` and warns to list/revoke the
+orphan rather than automatically retry. UI session transitions, in-memory secret
+lifetime and stale-response guards remain responsibilities of the later portal
+components. Client tests exercise these boundaries; real-browser UI verification
+remains a separate M4 rollout task.
+
+### HTTP concurrency and recovery proofs
+
+`apps/api/tests/http-accounting.test.ts` runs two independent API apps/pools
+against an isolated PostgreSQL database with non-UTC sessions. An observed owner
+lock barrier establishes overlapping billable reads before release: identical,
+different, no-header and separate-key intents, plus mixed v0/v1 last-quota races.
+A separate ingress barrier starts 64 HTTP admissions together; injected accounting
+time exercises exact rolling cutoffs and nonrenewing 429s without disabling the
+limiter. A held owner lock also proves post-wait UTC settlement/expiry decisions,
+in-flight revocation and sanitized operational timeout recovery.
+
+Real constraint failures prove settlement/cleanup rollback while admission remains
+committed. Lost delivery is followed by app/pool teardown, repeat initialization
+and fresh apps: live bindings, usage, allowance and a revoked public fixture must
+survive. The proof restarts apps/pools, not the operating-system process, and does
+not claim exactly-once network delivery. Existing billing/admission suites retain
+the broader microsecond/month/timezone/cleanup matrix; earlier HTTP suites retain
+preparation/query/serialization failures and error precedence coverage. No
+developer database is reset and no sleeps establish race ordering.
+
 ### Durable accounting primitives
 
 `0005_known_mariko_yashida.sql` adds a default-empty `rate_admissions`
