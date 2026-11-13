@@ -447,7 +447,7 @@ recreate API containers (`docker compose up -d --force-recreate api`) to apply t
 new value. Do not rotate `JWT_SECRET` as a substitute. No in-memory key registry or
 rotation UI is involved.
 
-The internal codec (`apps/api/src/ads/cursor.ts`) uses Node AES-256-GCM with a
+The internal codec (`apps/api/src/ads/v1/cursor.ts`) uses Node AES-256-GCM with a
 SHA-256-derived, domain-separated key, fresh 12-byte nonces, 16-byte tags and
 authenticated version context. Tokens carry only normalized query/sort, insertion
 snapshot, last position and original issue/expiry times—not credentials or result
@@ -697,7 +697,7 @@ failure through the root command; they never wait for random backdating.
 ## Legacy v0 parameter contract
 
 `GET /api/v0/ads?api_key=gethookd-public-demo-api-key-m2` serves the legacy
-contract. `apps/api/src/ads/router.ts` uses the raw query parser in `parameters.ts`
+contract. `apps/api/src/ads/v0/router.ts` uses the raw query parser in `parameters.ts`
 and validates the supplied key against PostgreSQL on every request; portal JWTs
 cannot substitute. Responses are not cached. All v0 failures, including database
 failures, return exactly HTTP 400 `{"error":"Invalid request"}` locally, without
