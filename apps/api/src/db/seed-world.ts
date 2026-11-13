@@ -1,11 +1,10 @@
 import { sql } from "drizzle-orm";
 
 import { isCountryCode } from "../ads/index.js";
-import type { createDatabase } from "./client.js";
+import type { Database } from "./client.js";
 import type { generateFixtures } from "./fixtures.js";
 import { ads, brands } from "./schema.js";
 
-type Database = ReturnType<typeof createDatabase>["db"];
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 const batchSize = 500;

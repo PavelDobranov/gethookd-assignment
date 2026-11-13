@@ -1,7 +1,7 @@
 import { type RequestHandler, Router } from "express";
 
 import type { KeyHandler, KeyResponse } from "../../api-keys/index.js";
-import type { createDatabase } from "../../db/client.js";
+import type { Database } from "../../db/client.js";
 import { prepareBilling, sendBillableResult } from "../../usage/index.js";
 import { niches } from "../model.js";
 import { CursorError, type CursorState, createCursorCodec } from "./cursor.js";
@@ -40,7 +40,7 @@ const handleGetNiches: RequestHandler = (req, res, next) => {
   res.json({ data: niches.map(({ slug, name }) => ({ slug, name })) });
 };
 
-function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): KeyHandler<{ id: string }> {
+function createGetAdHandler(db: Database): KeyHandler<{ id: string }> {
   return async function handleGetAd(req, res: KeyResponse, next) {
     if (req.method !== "GET") {
       next();
@@ -73,7 +73,7 @@ function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): KeyHan
   };
 }
 
-function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursorSecret: string): KeyHandler {
+function createSearchHandler(db: Database, cursorSecret: string): KeyHandler {
   const codec = createCursorCodec({ secret: cursorSecret, now: () => Date.now() });
   return async function handleSearch(req, res: KeyResponse, next) {
     if (req.method !== "GET") {
@@ -150,13 +150,7 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
   };
 }
 
-export function createRouter({
-  db,
-  cursorSecret,
-}: {
-  db: ReturnType<typeof createDatabase>["db"];
-  cursorSecret: string;
-}) {
+export function createRouter({ db, cursorSecret }: { db: Database; cursorSecret: string }) {
   const router = Router();
 
   // Register all methods so Express cannot synthesize an OPTIONS success when

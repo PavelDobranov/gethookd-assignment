@@ -1,6 +1,6 @@
 import { json, type Request, type RequestHandler, type Response, Router } from "express";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { errorBody } from "../shared/errors.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
 import { type AuthenticatedLocals, createRequireAuthentication } from "./middleware.js";
@@ -8,7 +8,7 @@ import { createAuthService } from "./service.js";
 import { parseCredentials } from "./validation.js";
 
 type AuthRouterDependencies = {
-  db: ReturnType<typeof createDatabase>["db"];
+  db: Database;
   jwtSecret: string;
 };
 

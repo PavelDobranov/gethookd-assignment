@@ -1,11 +1,11 @@
 import { type ErrorRequestHandler, type RequestHandler, Router } from "express";
 
 import { createAuthService } from "../auth/index.js";
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { sendError } from "../shared/http-errors.js";
 import { createManagementRouter, type ManagementLocals } from "./router.js";
 
-type Dependencies = { db: ReturnType<typeof createDatabase>["db"]; jwtSecret: string };
+type Dependencies = { db: Database; jwtSecret: string };
 
 function authenticate(auth: ReturnType<typeof createAuthService>): RequestHandler {
   return async function authenticatePortal(req, res, next) {

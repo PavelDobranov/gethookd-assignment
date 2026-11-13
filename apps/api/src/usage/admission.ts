@@ -1,11 +1,10 @@
 import { eq, sql } from "drizzle-orm";
 
 import { type ApiKeyIdentity, hashApiKey } from "../api-keys/index.js";
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { apiKeys } from "../db/schema.js";
 import { type AccountingClock, controlTransaction, databaseTime } from "./transactions.js";
 
-type Database = ReturnType<typeof createDatabase>["db"];
 export type Admission =
   | { allowed: true; identity: ApiKeyIdentity }
   | { allowed: false; identity: ApiKeyIdentity; retryAfter: number };

@@ -1,12 +1,12 @@
 import { type ErrorRequestHandler, json, type RequestHandler, type Response, Router } from "express";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { sendError } from "../shared/http-errors.js";
 import { readUsage } from "../usage/index.js";
 import { createApiKey, type KeyAuthority, KeyLifecycleError, listApiKeys, revokeApiKey } from "./lifecycle.js";
 import type { KeyHandler } from "./middleware.js";
 
-type Dependencies = { db: ReturnType<typeof createDatabase>["db"] };
+type Dependencies = { db: Database };
 export type ManagementLocals = { authority: KeyAuthority };
 type Locals = ManagementLocals;
 type Handler = RequestHandler<Record<string, string>, unknown, unknown, Record<string, unknown>, Locals>;

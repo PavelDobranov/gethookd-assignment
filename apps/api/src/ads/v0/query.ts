@@ -1,13 +1,13 @@
 import { and, count, desc, eq, or, sql } from "drizzle-orm";
 
-import type { createDatabase } from "../../db/client.js";
+import type { Database } from "../../db/client.js";
 import { ads, brands } from "../../db/schema.js";
 import { daysActive, niches } from "../model.js";
 import type { AdParameters } from "./parameters.js";
 
 const nicheNames = Object.fromEntries(niches.map(({ slug, name }) => [slug, name]));
 
-export async function queryAds(db: ReturnType<typeof createDatabase>["db"], parameters: AdParameters) {
+export async function queryAds(db: Database, parameters: AdParameters) {
   const pattern = `%${parameters.q.replace(/[\\%_]/g, "\\$&")}%`;
   const filters = and(
     or(sql`${ads.headline} ILIKE ${pattern} ESCAPE ${"\\"}`, sql`${ads.bodyText} ILIKE ${pattern} ESCAPE ${"\\"}`),

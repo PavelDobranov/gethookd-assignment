@@ -1,7 +1,7 @@
 import { and, eq, inArray, lte, max } from "drizzle-orm";
 
 import { isCountryCode } from "../ads/index.js";
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { ads, brands } from "../db/schema.js";
 import { createIngestAd } from "./ad.js";
 
@@ -13,7 +13,7 @@ export function validateIngestCountries(countries: unknown): asserts countries i
 
 // One caller/process owns scheduling; no concurrent ingest workers are supported.
 export async function runIngestTick(
-  db: ReturnType<typeof createDatabase>["db"],
+  db: Database,
   {
     clock = () => new Date(),
     random = Math.random,

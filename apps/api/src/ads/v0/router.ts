@@ -1,14 +1,13 @@
 import { type ErrorRequestHandler, type RequestHandler, Router } from "express";
 
 import type { KeyHandler, KeyResponse } from "../../api-keys/index.js";
-import type { createDatabase } from "../../db/client.js";
+import type { Database } from "../../db/client.js";
 import { sendRateLimited } from "../../shared/http-errors.js";
 import { disableCaching } from "../../shared/middleware/disable-caching.js";
 import { admitApiKey, billingBinding, checkBillingBinding, settleBilling } from "../../usage/index.js";
 import { parseAdParameters } from "./parameters.js";
 import { queryAds } from "./query.js";
 
-type Database = ReturnType<typeof createDatabase>["db"];
 const invalid: RequestHandler = (_req, res) => {
   res.status(400).json({ error: "Invalid request" });
 };

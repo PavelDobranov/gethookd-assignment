@@ -1,10 +1,9 @@
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import * as schema from "../db/schema.js";
 
-type Database = ReturnType<typeof createDatabase>["db"];
 export type ControlTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type AccountingClock = (tx: ControlTransaction) => Promise<string>;
 

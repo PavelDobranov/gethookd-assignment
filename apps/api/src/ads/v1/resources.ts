@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 
-import type { createDatabase } from "../../db/client.js";
+import type { Database } from "../../db/client.js";
 import { ads, brands } from "../../db/schema.js";
 import { daysActive } from "../model.js";
 
@@ -34,7 +34,7 @@ export function mapAdSummary(row: SummaryRow, now: Date) {
   };
 }
 
-export async function getAd(db: ReturnType<typeof createDatabase>["db"], id: string) {
+export async function getAd(db: Database, id: string) {
   const [row] = await db
     .select({
       id: ads.id,

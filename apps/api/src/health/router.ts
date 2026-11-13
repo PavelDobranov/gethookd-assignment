@@ -1,12 +1,12 @@
 import { sql } from "drizzle-orm";
 import { type RequestHandler, Router } from "express";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { errorBody } from "../shared/errors.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
 
 type HealthRouterDependencies = {
-  db: ReturnType<typeof createDatabase>["db"];
+  db: Database;
 };
 
 function createHealthHandler(db: HealthRouterDependencies["db"]): RequestHandler {

@@ -1,10 +1,9 @@
 import { sql } from "drizzle-orm";
 
 import type { ApiKeyIdentity } from "../api-keys/index.js";
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { type AccountingClock, controlTransaction, databaseTime } from "./transactions.js";
 
-type Database = ReturnType<typeof createDatabase>["db"];
 type BillingIdentity = Pick<ApiKeyIdentity, "id" | "userId">;
 // The request-identity boundary supplies hashes, never raw headers or request snapshots.
 export type BillingBinding = { valueHash: string; fingerprintHash: string };
