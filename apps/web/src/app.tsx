@@ -1,10 +1,12 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { AuthError, clearToken, getIdentity, login, readToken, storeToken, type User } from "./auth";
+import { Portal } from "./portal";
 import "./styles.css";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [validatedToken, setValidatedToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
@@ -14,6 +16,7 @@ export default function App() {
   const restore = useCallback(async () => {
     const request = ++generation.current;
     setUser(null);
+    setValidatedToken("");
     setChecking(true);
     setBusy(false);
     setError("");
@@ -23,6 +26,7 @@ export default function App() {
       if (token) {
         const identity = await getIdentity(token);
         if (request !== generation.current) return;
+        setValidatedToken(token);
         setUser(identity.user);
         history.replaceState(null, "", "/portal");
       } else {
@@ -84,6 +88,7 @@ export default function App() {
       const identity = await getIdentity(result.token);
       if (request !== generation.current) return;
       storeToken(result.token);
+      setValidatedToken(result.token);
       setUser(identity.user);
       history.replaceState(null, "", "/portal");
     } catch (failure) {
@@ -98,12 +103,13 @@ export default function App() {
     }
   }
 
-  function logout() {
+  const logout = useCallback(() => {
     generation.current++;
     setChecking(false);
     setBusy(false);
     history.replaceState(null, "", "/login");
     setUser(null);
+    setValidatedToken("");
     setUnavailable(false);
     try {
       clearToken();
@@ -111,7 +117,7 @@ export default function App() {
     } catch {
       setError("Session storage is unavailable. Close this tab to end the session.");
     }
-  }
+  }, []);
 
   if (checking) {
     return (
@@ -136,13 +142,14 @@ export default function App() {
   }
 
   return (
-    <main>
+    <main className={user ? "portal-layout" : undefined}>
       {user ? (
         <>
           <h1>{user.username}</h1>
           <button type="button" onClick={logout}>
             Log out
           </button>
+          <Portal token={validatedToken} userId={user.id} onUnauthenticated={logout} />
         </>
       ) : (
         <>

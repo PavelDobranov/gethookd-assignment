@@ -57,3 +57,118 @@ button {
 [role="alert"] {
   color: #8b2020;
 }
+
+.portal-layout {
+  max-width: 64rem;
+  margin-top: 2rem;
+}
+
+.portal {
+  display: grid;
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.portal section {
+  background: #fff;
+  border: 1px solid #c4ccd3;
+  border-radius: 0.25rem;
+  padding: 1rem;
+  min-width: 0;
+}
+
+h2 {
+  font-size: 1.25rem;
+}
+
+h3 {
+  font-size: 1rem;
+}
+
+fieldset {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid #657585;
+}
+
+fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+}
+
+input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.actions,
+.section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.section-heading {
+  justify-content: space-between;
+}
+
+.secret-reveal {
+  border-left: 0.25rem solid #173f5f;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.secret-reveal input {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0 1rem;
+  font-family: monospace;
+}
+
+.key-list {
+  list-style: none;
+  padding: 0;
+}
+
+.key-list li {
+  border-top: 1px solid #c4ccd3;
+  padding: 1rem 0;
+  overflow-wrap: anywhere;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: minmax(5rem, 7rem) minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0;
+}
+
+@media (max-width: 30rem) {
+  main {
+    padding: 0.75rem;
+    margin-top: 1rem;
+  }
+
+  .portal section {
+    padding: 0.75rem;
+  }
+
+  dl {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  dd {
+    margin-bottom: 0.5rem;
+  }
+}

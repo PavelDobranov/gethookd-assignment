@@ -682,10 +682,19 @@ response failures. Other rich errors must have a matching status/code and valid
 five-field envelope; server-controlled guidance/details never escape as error
 messages. An unknown creation outcome (network, server failure or invalid
 response) sets `PortalError.creationOutcomeUnknown` and warns to list/revoke the
-orphan rather than automatically retry. UI session transitions, in-memory secret
-lifetime and stale-response guards remain responsibilities of the later portal
-components. Client tests exercise these boundaries; real-browser UI verification
-remains a separate M4 rollout task.
+orphan rather than automatically retry.
+
+The protected portal now mounts key controls only after server identity validation.
+Select one or both scopes explicitly, then create a key. Its selectable secret is
+held only in component memory; copy reports success or offers manual selection on
+failure. Dismiss, logout, identity/credential change, unmount or reload clears the
+view. No secret is written to browser storage. Creation is never automatically
+retried: if delivery is uncertain, refresh the metadata list and revoke the orphan
+before explicitly creating another key. The metadata list supports all pages,
+manual refresh and truthful loading/empty/error states. Stale responses cannot
+restore old key data or secrets after a session transition. Component/client tests
+cover these boundaries; real-browser verification remains a separate M4 rollout
+task.
 
 ### HTTP concurrency and recovery proofs
 

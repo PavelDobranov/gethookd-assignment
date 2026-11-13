@@ -5,6 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "./app";
 import { TOKEN_STORAGE_KEY } from "./auth";
 
+vi.mock("./portal-api", async (original) => ({
+  ...(await original<typeof import("./portal-api")>()),
+  listKeys: vi.fn(async () => ({ data: [], limit: 20, offset: 0, has_more: false })),
+}));
+
 const token = "header.payload.signature";
 const user = { id: "server-id", username: "server-verified-user" };
 const fetchMock = vi.fn<typeof fetch>();
@@ -62,7 +67,7 @@ it("submits by keyboard, verifies identity, stores only JWT and logs out", async
   expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe(token);
   expect(localStorage.length).toBe(0);
   expect(location.pathname).toBe("/portal");
-  expect(screen.getAllByRole("button")).toHaveLength(1);
+  expect(screen.getByRole("heading", { name: "Create an API key" })).toBeDefined();
   const keyboard = userEvent.setup();
   screen.getByRole("button", { name: "Log out" }).focus();
   await keyboard.keyboard("{Enter}");
@@ -119,7 +124,7 @@ it("revalidates restored tokens before rendering protected content", async () =>
   expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({
     Authorization: `Bearer ${token}`,
   });
-  expect(screen.getAllByRole("button")).toHaveLength(1);
+  expect(screen.getByRole("heading", { name: "Create an API key" })).toBeDefined();
 });
 
 it("clears rejected restored tokens and returns to login", async () => {
