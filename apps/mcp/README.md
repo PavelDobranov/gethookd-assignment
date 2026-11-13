@@ -57,6 +57,22 @@ The transport is **stateless**: a fresh server instance serves each request and
 no session state is kept. Loopback Host/Origin guards run in front of the handler
 (DNS-rebinding protection); non-localhost requests get a `403`.
 
+### Claude Code
+
+Add this server to Claude Code with the HTTP transport, passing your own
+reveal-once API key as the Bearer credential:
+
+```bash
+claude mcp add --transport http gethookd http://127.0.0.1:3001/mcp \
+  --header "Authorization: Bearer <YOUR_API_KEY>"
+```
+
+The protected portal's **Connect Claude Code** panel shows this same secret-free
+template with a copy button; substitute your `search:read` key for the
+placeholder. A literal key in shell history or client config must be protected and
+never committed — prefer an environment reference (`Bearer $GETHOOKD_API_KEY`)
+where your client supports it.
+
 ## Tools
 
 | Tool          | Purpose                                                        | Inputs                                                                                                                       |

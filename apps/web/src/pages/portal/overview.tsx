@@ -3,6 +3,7 @@ import { Card } from "../../components/card";
 import { ProgressBar } from "../../components/progress-bar";
 import { useAppActions, useAppState } from "../../state/context";
 import { CodeBlock } from "./components/code-block";
+import { McpConnect } from "./components/mcp-connect";
 
 function relativeTime(iso: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
@@ -113,6 +114,7 @@ export function OverviewView() {
         </ol>
         <CodeBlock title="Your first API request" code={code} />
       </Card>
+      <McpConnect />
     </>
   );
 }
