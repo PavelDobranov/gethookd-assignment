@@ -1,6 +1,8 @@
 # DESIGN
 
-GetHookd v1 and MCP. The milestone specs and the decisions behind them live in these GitHub issues:
+GetHookd v1 and MCP. For how AI was used to build this project, see [AI notes](AI_NOTES.md).
+
+The milestone specs and the decisions behind them live in these GitHub issues:
 
 - [GetHookd — Technical assessment](https://github.com/PavelDobranov/gethookd-assignment/issues/1) — the assignment
 - [Milestone specification](https://github.com/PavelDobranov/gethookd-assignment/issues/2) — the roadmap
