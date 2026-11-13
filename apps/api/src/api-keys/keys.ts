@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { apiKeys } from "../db/schema.js";
-
-type Database = ReturnType<typeof createDatabase>["db"];
 
 export function hashApiKey(key: string): string {
   return createHash("sha256").update(key, "utf8").digest("hex");

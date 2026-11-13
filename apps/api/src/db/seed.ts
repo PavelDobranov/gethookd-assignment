@@ -4,12 +4,10 @@ import { eq } from "drizzle-orm";
 import { hashApiKey } from "../api-keys/index.js";
 import { hashPassword } from "../auth/password.js";
 import { loadConfig } from "../config.js";
-import { createDatabase } from "./client.js";
+import { createDatabase, type Database } from "./client.js";
 import { generateFixtures } from "./fixtures.js";
 import { apiKeys, users } from "./schema.js";
 import { seedWorld } from "./seed-world.js";
-
-type Database = ReturnType<typeof createDatabase>["db"];
 
 export async function seedDemoUser(db: Pick<Database, "insert">) {
   // Public local-development fixture; never replace existing credentials.

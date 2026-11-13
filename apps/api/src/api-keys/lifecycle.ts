@@ -1,13 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, getTableColumns, sql } from "drizzle-orm";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { apiKeys } from "../db/schema.js";
 import { type ApiKeyIdentity, hashApiKey } from "./keys.js";
 
 const allowedScopes = ["search:read", "keys:manage"] as const;
 export type ApiKeyScope = (typeof allowedScopes)[number];
-type Database = ReturnType<typeof createDatabase>["db"];
 
 // Only authenticated server identities belong here; never construct from request owner IDs.
 export type KeyAuthority = { kind: "user"; userId: string } | { kind: "api-key"; identity: ApiKeyIdentity };

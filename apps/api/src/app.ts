@@ -8,13 +8,13 @@ import { createPortalKeyRouter } from "./api-keys/portal-router.js";
 import { createApiKeyRouter } from "./api-keys/router.js";
 import { createAuthRouter } from "./auth/index.js";
 import { developmentCursorSecret } from "./config.js";
-import type { createDatabase } from "./db/client.js";
+import type { Database } from "./db/client.js";
 import { createHealthRouter } from "./health/router.js";
 import { disableCaching } from "./shared/middleware/disable-caching.js";
 import { handleErrors } from "./shared/middleware/handle-errors.js";
 
 type AppDependencies = {
-  db: ReturnType<typeof createDatabase>["db"];
+  db: Database;
   jwtSecret: string;
   cursorSecret?: string;
 };

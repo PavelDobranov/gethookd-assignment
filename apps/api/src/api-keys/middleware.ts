@@ -1,6 +1,6 @@
 import type { Request, RequestHandler, Response } from "express";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { sendError, sendHttpError, sendRateLimited } from "../shared/http-errors.js";
 import { admitApiKey } from "../usage/index.js";
 import type { ApiKeyIdentity } from "./keys.js";
@@ -16,7 +16,7 @@ export type KeyHandler<Params = Request["params"]> = RequestHandler<
   KeyLocals
 >;
 
-export function createRequireApiKey(db: ReturnType<typeof createDatabase>["db"]): KeyHandler {
+export function createRequireApiKey(db: Database): KeyHandler {
   return async (req, res: KeyResponse, next) => {
     const occurrences = req.rawHeaders.filter(
       (header, index) => index % 2 === 0 && header.toLowerCase() === "authorization",

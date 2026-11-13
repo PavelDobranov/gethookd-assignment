@@ -1,11 +1,9 @@
 import { eq } from "drizzle-orm";
 
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { signToken, verifySubject } from "./jwt.js";
 import { verifyPassword } from "./password.js";
-
-type Database = ReturnType<typeof createDatabase>["db"];
 
 export type Credentials = {
   username: string;

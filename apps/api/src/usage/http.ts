@@ -1,12 +1,10 @@
 import type { IncomingMessage } from "node:http";
 
 import type { KeyResponse } from "../api-keys/index.js";
-import type { createDatabase } from "../db/client.js";
+import type { Database } from "../db/client.js";
 import { sendError, sendQuotaExceeded } from "../shared/http-errors.js";
 import { type BillingBinding, BillingError, checkBillingBinding, settleBilling } from "./billing.js";
 import { type BillableRequest, billingBinding, IdempotencyHeaderError } from "./identity.js";
-
-type Database = ReturnType<typeof createDatabase>["db"];
 
 /** Only call after route input/cursor validation, before executing a billable read. */
 export async function prepareBilling(db: Database, req: IncomingMessage, res: KeyResponse, request: BillableRequest) {
