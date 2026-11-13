@@ -4,7 +4,7 @@ import { createDatabase } from "./db/client.js";
 
 const config = loadConfig();
 const database = createDatabase(config.databaseUrl);
-const app = createApp({ db: database.db, jwtSecret: config.jwtSecret });
+const app = createApp({ db: database.db, jwtSecret: config.jwtSecret, cursorSecret: config.cursorSecret });
 
 const server = app.listen(3000, "0.0.0.0", () => {
   console.log("API listening on port 3000");

@@ -1,6 +1,7 @@
 import { json, type Request, type RequestHandler, type Response, Router } from "express";
 
 import type { createDatabase } from "../db/client.js";
+import { errorBody } from "../shared/errors.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
 import { type AuthenticatedLocals, createRequireAuthentication } from "./middleware.js";
 import { createAuthService } from "./service.js";
@@ -16,24 +17,21 @@ function createLoginHandler(auth: Pick<ReturnType<typeof createAuthService>, "lo
     const credentials = parseCredentials(req.body);
 
     if (!credentials) {
-      res.status(422).json({
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Username and password must be nonempty strings of at most 100 and 1024 characters.",
-        },
-      });
+      res
+        .status(422)
+        .json(
+          errorBody(
+            "VALIDATION_ERROR",
+            "Username and password must be nonempty strings of at most 100 and 1024 characters.",
+          ),
+        );
       return;
     }
 
     const session = await auth.login(credentials);
 
     if (!session) {
-      res.status(401).json({
-        error: {
-          code: "INVALID_CREDENTIALS",
-          message: "Invalid username or password.",
-        },
-      });
+      res.status(401).json(errorBody("INVALID_CREDENTIALS", "Invalid username or password."));
       return;
     }
 

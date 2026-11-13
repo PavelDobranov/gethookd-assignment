@@ -23,6 +23,14 @@ apps/api/
     shared/                   # Feature-independent code only; no feature imports
   tests/                      # Focused and integration tests
 
+API versions live in per-version subfolders `<feature>/v{n}/` (e.g. `ads/v0/`,
+`ads/v1/`). Identifiers inside them are version-free — each version's router
+exports `createRouter` — and the composition root (`app.ts`) disambiguates once
+via import aliasing (`createRouter as createV1Router`). Version-independent
+domain and the feature's public `index.ts` stay at the feature root, shared
+across versions. A new version is a new `v{n}/` folder that renames nothing in
+the existing ones. See `docs/adr/0003-api-version-directory-layout.md`.
+
 A feature's index.ts exports only values and types needed by production code
 outside that feature. Do not re-export internals solely for tests or hypothetical
 future consumers. This keeps index.ts an explicit, minimal public contract.

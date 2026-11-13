@@ -1,0 +1,3 @@
+ALTER TABLE "api_keys" ALTER COLUMN "prefix" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "api_keys" ALTER COLUMN "scopes" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_scopes_check" CHECK ("api_keys"."scopes" = ARRAY['search:read']::text[] OR "api_keys"."scopes" = ARRAY['keys:manage']::text[] OR "api_keys"."scopes" = ARRAY['search:read', 'keys:manage']::text[]);

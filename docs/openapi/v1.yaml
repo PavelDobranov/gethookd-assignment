@@ -1,0 +1,792 @@
+openapi: 3.1.1
+info:
+  title: GetHookd v1 REST API
+  version: 1.0.0
+  description: |
+    Stored API keys authenticate every request, including continuations; portal JWTs
+    and query-string api_key credentials do not authenticate v1. Authentication
+    precedes resource validation. All v1 successes and errors use Cache-Control: no-store.
+    Unknown v1 routes and unsupported methods return NOT_FOUND (404) in the same
+    error envelope. Malformed path encodings return VALIDATION_ERROR (422).
+    Ad reads and niche discovery require search:read; key management and usage
+    require keys:manage. Scopes are stored immutable key metadata, not OAuth grants.
+    Revocation is permanent and blocks authentication after commit; in-flight calls
+    may finish. last_used_at records successful credential authentication, including
+    later scope, input, quota and rate failures; invalid/revoked credentials do not advance it.
+
+    All authenticated API-key calls (including failures, retries, unknown routes and
+    unsupported methods) share 60 admissions per key in rolling (t - 60 seconds, t].
+    Denials do not extend the window; exactly 60 seconds releases an admission.
+    JWT portal calls are outside this allowance. Retry-After is integer seconds,
+    ceil of the oldest blocking admission's remaining time, minimum 1. Guidance is
+    accurate at decision time, not a reservation against competing traffic.
+
+    Precedence is live authentication, rate admission, scope/input validation, active
+    idempotency conflict, execution and atomic billing settlement before sending 200.
+    Known conflicts win over quota exhaustion. Control-store failures fail closed.
+    Only successful v0 search, v1 search (including empty results and every cursor
+    page) and v1 detail are billable. Discovery, management, usage and failures are free.
+    The owner shares 1,000 billable calls across keys per UTC calendar month;
+    settlement time selects the start-inclusive/end-exclusive period. No scheduler
+    reset or per-key second quota exists. QUOTA_EXCEEDED is non-retryable with the
+    exact UTC reset in details[0].suggestion (parameter quota, reason
+    monthly_quota_exceeded, allowed_values []). Free operations and matching billed
+    retries remain available under normal authentication/rate/scope/input checks.
+
+    Idempotency-Key is optional on billable reads. Without it each successful call
+    charges separately. A binding is per API key and normalized method/operation and
+    effective parameters, including page size and supplied opaque cursor. Equivalent
+    ordering/defaults/normalization agree; different endpoints/versions do not.
+    Detail IDs retain exact decoded case/whitespace. Different keys have independent
+    namespaces but share owner quota. Binding starts only at successful settlement,
+    expires exactly 24 hours later and never renews on retry; failures neither charge
+    nor claim it. Concurrent identical successes charge once; differing intents cannot
+    both succeed. Matching retries execute current reads, not cached response replay,
+    and remain free after quota exhaustion/across month boundaries until expiry.
+    At expiry reuse is a new billable intent in the current month. Expired cursors
+    still fail free. Committed settlement remains billed if delivery is lost;
+    retry with the same optional value to avoid another charge. No exactly-once
+    network delivery is promised. Raw values/credentials are never reflected.
+    On discovery, management and usage the header is ignored, even if invalid;
+    it does not make creation retry-safe. v0 retains generic 400 for non-rate errors;
+    only its approved 429 exception uses the richer RATE_LIMITED envelope.
+security:
+  - BearerApiKey: []
+paths:
+  /api/v1/ads:
+    get:
+      operationId: searchAds
+      summary: Search ads with strict filters and opaque forward pagination
+      description: |
+        Only the listed, case-sensitive query names are accepted. Unknown names
+        (including page, per_page, api_key, niche[] and niche[x]) and repeated
+        scalar parameters return 422. Only niche may repeat. Validate all supplied
+        values before normalizing; do not silently fix case, display names or typos.
+        Filters combine with AND; niches combine with OR; q searches headline OR body.
+        sort=impressions requires one brand_id; otherwise 422 with instructions to
+        add brand_id or use newest. Parameter schemas cannot express this cross-field rule.
+
+        newest orders start_date DESC, then text id ASC using bytewise C collation.
+        impressions orders impression_rank ASC NULLS LAST, then the same id order.
+        Rank 1 is highest within one brand; gaps remain and null means unknown, not
+        zero. Ranks cannot establish impression magnitudes or compare brands.
+
+        Page one establishes a committed database visibility boundary B. Both sorts
+        exclude ALL inserts committed after B, including backdated inserts and
+        inserts already in flight at B. A forward walk has no duplicates and returns
+        each initially matching ad that continues to match exactly once. Each page
+        reads live status/end_date coherently: deactivated ads may leave active
+        searches, but remain in unfiltered searches. Previously existing ads newly
+        matching an inactive filter may appear ahead of the current position; their
+        inclusion is not guaranteed. A fresh search is needed for complete newly
+        eligible results. Guarantees assume the supported single-ingest mutation
+        model (insert/deactivate, immutable existing ordering keys), not arbitrary
+        edits, deletes, reactivation or multiple ingest workers.
+
+        A cursor binds normalized original filters/sort, boundary and position.
+        Send only cursor plus optional limit, or repeat query-defining parameters
+        that normalize to the original values. Omitted filters inherit originals;
+        the complete supplied niche set must match. Changed meaning returns
+        CURSOR_QUERY_MISMATCH. Limit may change and defaults to 20 on every request.
+        Cursors expire exactly 30 minutes after page-one start, without renewal.
+        They are reusable reads, not destructive state advances; replay may differ
+        with live updates. No total/count or historical mutable-field snapshot is
+        promised. Exhaustion does not subscribe to later status changes.
+        Ordinary restarts preserve tokens with unchanged secret/database history;
+        secret rotation invalidates them. Rotate CURSOR_SECRET after database
+        restore/replacement and start fresh searches. Oversize server-generated
+        tokens fail safely with 500 rather than weakening the boundary.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: q
+          in: query
+          description: |
+            Trim outer whitespace, preserve internal whitespace/case. Empty or
+            whitespace-only means no keyword restriction. At most 500 Unicode code
+            points AFTER trimming; the schema describes the normalized value.
+            Case-insensitive literal substring of headline OR body_text; %, _ and
+            backslash are literal, never patterns. NUL is invalid.
+          schema: { type: string, maxLength: 500, pattern: '^[^\u0000]*$', default: '' }
+        - name: niche
+          in: query
+          style: form
+          explode: true
+          description: |
+            Repeated keys, e.g. niche=skincare&niche=haircare. Exact canonical slugs
+            only; empty elements, display names, case variants, comma-separated and
+            bracket syntax are invalid. Normalize by deduplicating and lexical sorting.
+            Omitted means no niche restriction (empty array).
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/NicheSlug' }
+            default: []
+        - name: format
+          in: query
+          description: Exact canonical format; omitted means unrestricted, empty is invalid.
+          schema: { $ref: '#/components/schemas/AdFormat' }
+        - name: status
+          in: query
+          description: Exact canonical status; omitted means unrestricted, empty is invalid.
+          schema: { $ref: '#/components/schemas/AdStatus' }
+        - name: started_after
+          in: query
+          description: Exclusive start_date boundary; real Gregorian YYYY-MM-DD, years 0001–9999. Future dates are valid.
+          schema: { $ref: '#/components/schemas/CalendarDate' }
+        - name: brand_id
+          in: query
+          description: |
+            Positive base-10 integer 1–2147483647. Digits only, no sign, whitespace,
+            fraction or exponent; leading zeros normalize numerically. Required for
+            impressions. A valid nonexistent brand matches no ads.
+          schema: { type: integer, minimum: 1, maximum: 2147483647 }
+        - name: sort
+          in: query
+          description: Exact value; impressions requires brand_id (cross-field rule above).
+          schema: { $ref: '#/components/schemas/Sort' }
+        - name: limit
+          in: query
+          description: Positive base-10 digits only; leading zeros allowed. Never clamped; may change during a walk.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          description: |
+            Opaque, authenticated, versioned token from next_cursor. Contains no API
+            key/JWT and never substitutes for auth. Empty, malformed, tampered,
+            unsupported or secret-invalidated tokens return INVALID_CURSOR; at or
+            after fixed expiry return CURSOR_EXPIRED. Start fresh rather than retry
+            the same expired token. Syntax alone does not prove integrity or validity.
+          schema: { type: string, minLength: 1, maxLength: 4096, pattern: '^[A-Za-z0-9_.-]+$' }
+      responses:
+        '200':
+          description: Matching summaries; empty/final pages have next_cursor null, including the final nonempty page.
+          headers:
+            Cache-Control: { schema: { const: no-store }, description: Never cache protected data. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/ForbiddenRead' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '422': { $ref: '#/components/responses/SearchInvalid' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/ads/{id}:
+    get:
+      operationId: getAd
+      summary: Retrieve full current detail for an exact opaque ad ID
+      description: |
+        No query parameters accepted. URL-encode the nonempty opaque text ID; it is
+        not an integer or seed-specific pattern. NUL/malformed encoding returns 422.
+        Missing ID returns AD_NOT_FOUND. Detail is a current read, independent of cursors.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, pattern: '^[^\u0000]*$' }
+      responses:
+        '200':
+          description: Full ad detail; no database, user, API-key or snapshot internals.
+          headers:
+            Cache-Control: { schema: { const: no-store } }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AdDetail' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ForbiddenRead' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '404': { $ref: '#/components/responses/AdNotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/niches:
+    get:
+      operationId: listNiches
+      summary: Discover canonical niche slugs and display names (search:read)
+      description: No query parameters. Returns exactly the 12 catalog entries in catalog order, without pagination, counts or seed keywords.
+      responses:
+        '200':
+          description: Existing niche catalog in the order shown by NicheSlug.
+          headers:
+            Cache-Control: { schema: { const: no-store } }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    minItems: 12
+                    maxItems: 12
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [slug, name]
+                      properties:
+                        slug: { $ref: '#/components/schemas/NicheSlug' }
+                        name: { type: string, minLength: 1 }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/keys:
+    get:
+      operationId: listKeys
+      summary: List this owner's active and revoked key metadata (keys:manage)
+      description: Live metadata pagination, not a snapshot walk. Order created_at DESC, id ASC. No query credentials or unknown/repeated parameters.
+      parameters:
+        - $ref: '#/components/parameters/KeyLimit'
+        - $ref: '#/components/parameters/KeyOffset'
+      responses:
+        '200': { $ref: '#/components/responses/KeyList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createKey
+      summary: Create a reveal-once key (keys:manage, subset delegation only)
+      description: |
+        No query parameters. Scopes must be a subset of caller scopes; an allowed
+        scope absent from the caller yields INSUFFICIENT_SCOPE, not validation failure.
+        JSON object with exactly scopes; router-local limit 16 KB. Canonical output
+        order is search:read then keys:manage. No defaults or mutable scopes.
+        Secret has 256 random bits, only its SHA-256 hash is stored. Public prefix
+        is the first 12 characters, not unique and never an authentication credential.
+        Secret is revealed only here. If creation delivery is unknown, list/revoke
+        the orphan and create another; no automatic POST retry or recovery endpoint.
+        Idempotency-Key is ignored and never deduplicates creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateKeyInput' }
+      responses:
+        '201': { $ref: '#/components/responses/KeyCreated' }
+        '400': { $ref: '#/components/responses/MalformedJson' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/keys/{id}:
+    delete:
+      operationId: revokeKey
+      summary: Permanently revoke an owned key (keys:manage)
+      description: No query parameters. Missing/foreign IDs are indistinguishable. Repeat revocation preserves the original timestamp. Self-revocation succeeds; next authentication fails. JWT login remains recovery; no last-key safeguard.
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '204':
+          description: Revoked; empty body, no Content-Type.
+          headers:
+            Cache-Control: { schema: { const: no-store } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/KeyNotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/usage:
+    get:
+      operationId: getUsage
+      summary: Read the authoritative current UTC owner meter (keys:manage)
+      description: No query parameters. Coherent at the database read point; all owner keys share this view. Revocation never reduces historical usage. Missing history yields zero in the current period; storage failure never yields fake zero.
+      responses:
+        '200': { $ref: '#/components/responses/Usage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Exactly one optional header; case-insensitive name, case-sensitive opaque value after normal HTTP optional-whitespace parsing. Invalid/empty/duplicate values yield 422. Billing deduplication only, never response replay.
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' }
+    KeyLimit:
+      name: limit
+      in: query
+      description: Decimal digits only, leading zeros allowed, never clamped; repeated values invalid.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    KeyOffset:
+      name: offset
+      in: query
+      description: Nonnegative safe integer, decimal digits only; repeated values invalid.
+      schema: { type: integer, minimum: 0, maximum: 9007199254740991, default: 0 }
+    KeyId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    BearerApiKey: { type: http, scheme: bearer }
+  schemas:
+    NicheSlug:
+      type: string
+      enum: [skincare, haircare, supplements, fitness, pet-supplies, home-decor, kitchen, apparel, jewelry, baby-kids, outdoor, tech-accessories]
+    AdFormat: { type: string, enum: [image, video, carousel] }
+    AdStatus: { type: string, enum: [active, inactive] }
+    Sort: { type: string, enum: [newest, impressions], default: newest }
+    CalendarDate:
+      type: string
+      format: date
+      pattern: '^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    UtcTimestamp:
+      type: string
+      format: date-time
+      pattern: 'Z$'
+    AdSummary:
+      type: object
+      additionalProperties: false
+      required: [id, brand_id, brand_name, headline, niche, format, status, start_date, days_active, impression_rank]
+      properties:
+        id: { type: string, minLength: 1 }
+        brand_id: { type: integer, minimum: 1, maximum: 2147483647 }
+        brand_name: { type: string }
+        headline: { type: string, description: Full stored headline; not silently truncated. }
+        niche: { $ref: '#/components/schemas/NicheSlug' }
+        format: { $ref: '#/components/schemas/AdFormat' }
+        status: { $ref: '#/components/schemas/AdStatus' }
+        start_date: { $ref: '#/components/schemas/CalendarDate' }
+        days_active:
+          type: integer
+          description: |
+            Derived whole UTC calendar days: active uses UTC today minus start_date;
+            inactive uses end_date minus start_date. One coherent time per response,
+            not stored or frozen at B; may change across UTC midnight. Future starts
+            can produce negative values.
+        impression_rank: { type: [integer, 'null'], minimum: 1, description: Brand-local rank; null is unknown. }
+    AdDetail:
+      type: object
+      additionalProperties: false
+      required: [id, brand_id, brand_name, headline, niche, format, status, start_date, days_active, impression_rank, body_text, end_date, countries, discovered_at]
+      properties:
+        id: { type: string, minLength: 1 }
+        brand_id: { type: integer, minimum: 1, maximum: 2147483647 }
+        brand_name: { type: string }
+        headline: { type: string }
+        niche: { $ref: '#/components/schemas/NicheSlug' }
+        format: { $ref: '#/components/schemas/AdFormat' }
+        status: { $ref: '#/components/schemas/AdStatus' }
+        start_date: { $ref: '#/components/schemas/CalendarDate' }
+        days_active: { type: integer, description: Same live UTC derivation as AdSummary. }
+        impression_rank: { type: [integer, 'null'], minimum: 1 }
+        body_text: { type: string }
+        end_date:
+          anyOf:
+            - { $ref: '#/components/schemas/CalendarDate' }
+            - { type: 'null' }
+        countries:
+          type: array
+          uniqueItems: true
+          items: { type: string, pattern: '^[A-Z]{2}$', description: Assigned ISO 3166-1 alpha-2 code. }
+        discovered_at: { $ref: '#/components/schemas/UtcTimestamp' }
+    AppliedFilters:
+      type: object
+      additionalProperties: false
+      required: [q, niche, format, status, started_after, brand_id]
+      properties:
+        q: { type: string, maxLength: 500 }
+        niche:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/NicheSlug' }
+          description: Lexically sorted canonical slugs; absent is [].
+        format:
+          anyOf:
+            - { $ref: '#/components/schemas/AdFormat' }
+            - { type: 'null' }
+        status:
+          anyOf:
+            - { $ref: '#/components/schemas/AdStatus' }
+            - { type: 'null' }
+        started_after:
+          anyOf:
+            - { $ref: '#/components/schemas/CalendarDate' }
+            - { type: 'null' }
+        brand_id: { type: [integer, 'null'], minimum: 1, maximum: 2147483647 }
+    SearchResponse:
+      type: object
+      additionalProperties: false
+      required: [data, applied_filters, sort, limit, next_cursor, cursor_expires_at]
+      properties:
+        data:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/AdSummary' }
+        applied_filters:
+          $ref: '#/components/schemas/AppliedFilters'
+          description: Effective normalized ORIGINAL filters on every page, including empty results and continuations. Absent scalars are null, keyword is empty string, niches are [].
+        sort: { $ref: '#/components/schemas/Sort' }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        next_cursor:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 4096
+          pattern: '^[A-Za-z0-9_.-]+$'
+        cursor_expires_at:
+          $ref: '#/components/schemas/UtcTimestamp'
+          description: Fixed first-page expiry even on final/empty pages; never renewed.
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, next_action, retryable, details]
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHENTICATED, AD_NOT_FOUND, KEY_NOT_FOUND, NOT_FOUND, VALIDATION_ERROR, INVALID_CURSOR, CURSOR_EXPIRED, CURSOR_QUERY_MISMATCH, INTERNAL_ERROR, INSUFFICIENT_SCOPE, QUOTA_EXCEEDED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, MALFORMED_JSON, BODY_TOO_LARGE]
+            message: { type: string, minLength: 1 }
+            next_action: { type: string, minLength: 1 }
+            retryable: { type: boolean, description: Same intended read might succeed without correcting client input; not a guarantee. }
+            details:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [parameter, reason, allowed_values, suggestion]
+                properties:
+                  parameter: { type: string }
+                  reason: { type: string }
+                  allowed_values: { type: array, items: { type: string } }
+                  suggestion: { type: [string, 'null'] }
+          description: Safe public corrections only; never credentials, cursor contents, SQL, stack traces or internal diagnostics. Details is [] when inapplicable; wording is not a machine contract.
+    Scopes:
+      type: array
+      minItems: 1
+      maxItems: 2
+      uniqueItems: true
+      items: { type: string, enum: ['search:read', 'keys:manage'] }
+    CreateKeyInput:
+      type: object
+      additionalProperties: false
+      required: [scopes]
+      properties:
+        scopes: { $ref: '#/components/schemas/Scopes' }
+    CanonicalScopes:
+      type: array
+      enum: [['search:read'], ['keys:manage'], ['search:read', 'keys:manage']]
+    KeyMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, prefix, scopes, created_at, last_used_at, revoked_at]
+      properties:
+        id: { type: string, format: uuid }
+        prefix: { type: string, minLength: 1, description: Public identification only; collisions possible. }
+        scopes: { $ref: '#/components/schemas/CanonicalScopes' }
+        created_at: { $ref: '#/components/schemas/UtcTimestamp' }
+        last_used_at:
+          anyOf:
+            - { $ref: '#/components/schemas/UtcTimestamp' }
+            - { type: 'null' }
+        revoked_at:
+          anyOf:
+            - { $ref: '#/components/schemas/UtcTimestamp' }
+            - { type: 'null' }
+    KeyCreated:
+      type: object
+      additionalProperties: false
+      required: [data, secret]
+      properties:
+        data: { $ref: '#/components/schemas/KeyMetadata' }
+        secret: { type: string, pattern: '^ghk_[A-Za-z0-9_-]{43}$' }
+    KeyList:
+      type: object
+      additionalProperties: false
+      required: [data, limit, offset, has_more]
+      properties:
+        data: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/KeyMetadata' } }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        offset: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        has_more: { type: boolean }
+    Usage:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [period_start, period_end, billable_calls, quota, remaining]
+          properties:
+            period_start: { $ref: '#/components/schemas/UtcTimestamp' }
+            period_end: { $ref: '#/components/schemas/UtcTimestamp' }
+            billable_calls: { type: integer, minimum: 0, maximum: 1000 }
+            quota: { const: 1000 }
+            remaining: { type: integer, minimum: 0, maximum: 1000 }
+    Error400:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - properties:
+            error:
+              properties:
+                code: { const: MALFORMED_JSON }
+                retryable: { const: false }
+              type: object
+          type: object
+    Error403:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { enum: [INSUFFICIENT_SCOPE, QUOTA_EXCEEDED] }
+                retryable: { const: false }
+        - type: object
+          properties:
+            error:
+              type: object
+              if:
+                properties:
+                  code: { const: QUOTA_EXCEEDED }
+              then:
+                properties:
+                  details:
+                    type: array
+                    minItems: 1
+                    maxItems: 1
+                    items:
+                      type: object
+                      properties:
+                        parameter: { const: quota }
+                        reason: { const: monthly_quota_exceeded }
+                        allowed_values: { type: array, maxItems: 0 }
+                        suggestion: { $ref: '#/components/schemas/UtcTimestamp' }
+    Error409:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: IDEMPOTENCY_CONFLICT }
+                retryable: { const: false }
+    Error413:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: BODY_TOO_LARGE }
+                retryable: { const: false }
+    Error429:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: RATE_LIMITED }
+                retryable: { const: true }
+    Error401:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: UNAUTHENTICATED }
+                retryable: { const: false }
+    Error404:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { enum: [NOT_FOUND, AD_NOT_FOUND, KEY_NOT_FOUND] }
+                retryable: { const: false }
+    Error422:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { enum: [VALIDATION_ERROR, INVALID_CURSOR, CURSOR_EXPIRED, CURSOR_QUERY_MISMATCH] }
+                retryable: { const: false }
+    Error500:
+      allOf:
+        - { $ref: '#/components/schemas/ErrorEnvelope' }
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                code: { const: INTERNAL_ERROR }
+                retryable: { const: true }
+  responses:
+    KeyCreated:
+      description: Reveal-once creation; never automatically retry an unknown delivery outcome.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/KeyCreated' }
+    KeyList:
+      description: Owned active/revoked metadata only, never secrets, hashes or owner IDs.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/KeyList' }
+    Usage:
+      description: Current-period authoritative settled usage, including revoked keys' charges.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Usage' }
+    MalformedJson:
+      description: Malformed JSON or unsupported/corrupt JSON encoding; non-retryable.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error400' }
+    BodyTooLarge:
+      description: JSON body exceeds 16 KB; non-retryable.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error413' }
+    InsufficientScope:
+      description: Required scope absent or delegation exceeds caller scopes; retries cannot elevate privileges.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error403' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { const: INSUFFICIENT_SCOPE } } }
+    ForbiddenRead:
+      description: INSUFFICIENT_SCOPE or owner-wide QUOTA_EXCEEDED. Quota details contain parameter quota, reason monthly_quota_exceeded, empty allowed_values and suggestion equal to the UTC reset timestamp. Both are non-retryable.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error403' }
+    IdempotencyConflict:
+      description: Active per-key value bound to a different effective request; non-retryable, no prior request contents disclosed. Correct the pairing or use a new value.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error409' }
+    KeyNotFound:
+      description: Missing and foreign-owned valid UUIDs both return KEY_NOT_FOUND; unsupported routes/methods return NOT_FOUND.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error404' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { enum: [KEY_NOT_FOUND, NOT_FOUND] } } }
+    RateLimited:
+      description: Rolling per-key allowance exhausted; retryable. Message and next_action both state the same numeric wait as Retry-After. No extra top-level reset fields.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+        Retry-After: { required: true, schema: { type: integer, minimum: 1, maximum: 60 } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error429' }
+    Unauthenticated:
+      description: Missing, malformed or invalid Bearer API key. Supply a valid stored key, never a portal JWT or query-string credential.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error401' }
+    NotFound:
+      description: Unknown v1 route or unsupported method; use a documented route and method.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error404' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { const: NOT_FOUND } } }
+    AdNotFound:
+      description: AD_NOT_FOUND for a missing exact ID; NOT_FOUND for unsupported routes/methods. Check IDs from search results.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error404' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { enum: [NOT_FOUND, AD_NOT_FOUND] } } }
+    ValidationError:
+      description: Invalid query/path/header/body. Correct names/values; details contain allowed choices and deterministic advisory suggestions, never automatic corrections.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/Error422' }
+              - type: object
+                properties:
+                  error: { type: object, properties: { code: { const: VALIDATION_ERROR } } }
+    SearchInvalid:
+      description: |
+        VALIDATION_ERROR for invalid requests (including missing brand for impressions).
+        INVALID_CURSOR: use an unmodified supported token or start fresh.
+        CURSOR_EXPIRED: start fresh; retrying the same token cannot help.
+        CURSOR_QUERY_MISMATCH: retain original query meaning or start fresh.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error422' }
+    InternalError:
+      description: Unexpected/database failure; retry after a short delay, not in a tight loop. Never translated into 401 or empty 200.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error500' }

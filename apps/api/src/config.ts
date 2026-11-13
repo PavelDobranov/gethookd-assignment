@@ -12,6 +12,9 @@ type ConfigOptions = {
 // Public local-development placeholder, never a production signing secret.
 const developmentJwtSecret = "gethookd-public-development-secret-do-not-use-in-production";
 
+// Public local-development placeholder, independent of portal and API credentials.
+export const developmentCursorSecret = "gethookd-public-development-cursor-secret-do-not-use-in-production";
+
 export function loadConfig({
   env = process.env,
   envFile = new URL("../../../.env", import.meta.url),
@@ -47,6 +50,11 @@ export function loadConfig({
     throw new Error("Invalid JWT_SECRET");
   }
 
+  const cursorSecret = setting("CURSOR_SECRET", developmentCursorSecret);
+  if (Buffer.byteLength(cursorSecret, "utf8") < 32) {
+    throw new Error("Invalid CURSOR_SECRET");
+  }
+
   function encode(key: string, value: string) {
     try {
       return encodeURIComponent(value);
@@ -74,5 +82,5 @@ export function loadConfig({
     throw new Error("Invalid DATABASE_URL");
   }
 
-  return { postgresUser, postgresPassword, postgresDb, databaseUrl, jwtSecret };
+  return { postgresUser, postgresPassword, postgresDb, databaseUrl, jwtSecret, cursorSecret };
 }

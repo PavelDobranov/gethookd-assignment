@@ -1,0 +1,107 @@
+openapi: 3.1.1
+info:
+  title: GetHookd Developer Portal management API
+  version: 1.0.0
+  description: |
+    JWT-only owner-scoped management. Authorization is Bearer <portal JWT> from
+    existing login; API keys and query credentials never authenticate these routes.
+    Server identity determines ownership, never body/query owner IDs. All responses,
+    including failures, use Cache-Control: no-store. Existing /api/auth/* and health
+    contracts are unchanged. Unsupported routes/methods yield NOT_FOUND (404).
+    JWT calls do not consume the API-key rolling allowance; no 429 is introduced.
+    These operations are free and read the same owner meter as v1. Idempotency-Key
+    is ignored, including invalid values, and does not make POST retry-safe.
+    Shared wire schemas/parameters reference v1.yaml, not its API-key security.
+security:
+  - BearerPortalJwt: []
+paths:
+  /api/portal/keys:
+    get:
+      operationId: listPortalKeys
+      summary: List this owner's active and revoked keys
+      description: Live pagination, not a snapshot walk; created_at DESC, id ASC. Only limit and offset query names accepted; no repeated values or query credentials.
+      parameters:
+        - $ref: 'v1.yaml#/components/parameters/KeyLimit'
+        - $ref: 'v1.yaml#/components/parameters/KeyOffset'
+      responses:
+        '200': { $ref: 'v1.yaml#/components/responses/KeyList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: 'v1.yaml#/components/responses/NotFound' }
+        '422': { $ref: 'v1.yaml#/components/responses/ValidationError' }
+        '500': { $ref: 'v1.yaml#/components/responses/InternalError' }
+    post:
+      operationId: createPortalKey
+      summary: Create a reveal-once managed key
+      description: |
+        No query parameters. JSON object exactly containing scopes, limited to 16 KB.
+        Nonempty distinct allowed scopes; JWT owner may grant either or both.
+        Canonical output order is search:read then keys:manage. Scopes are immutable.
+        Secret contains 256 random bits; only SHA-256 hash is stored. Public prefix
+        is the first 12 characters, not unique or a credential. Creation is the only
+        reveal: never browser-persist the secret. If delivery is unknown, list/revoke
+        the orphan and create another. No automatic POST retry, secret recovery or
+        idempotency deduplication is promised.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'v1.yaml#/components/schemas/CreateKeyInput' }
+      responses:
+        '201': { $ref: 'v1.yaml#/components/responses/KeyCreated' }
+        '400': { $ref: 'v1.yaml#/components/responses/MalformedJson' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: 'v1.yaml#/components/responses/NotFound' }
+        '413': { $ref: 'v1.yaml#/components/responses/BodyTooLarge' }
+        '422': { $ref: 'v1.yaml#/components/responses/ValidationError' }
+        '500': { $ref: 'v1.yaml#/components/responses/InternalError' }
+  /api/portal/keys/{id}:
+    delete:
+      operationId: revokePortalKey
+      summary: Permanently revoke an owned key
+      description: |
+        No query parameters. Invalid UUID yields 422; missing and foreign-owned
+        UUIDs are indistinguishable KEY_NOT_FOUND. Repeated revocation preserves the
+        first timestamp. No last-key safeguard, reactivation, edit or rotate flow.
+        Revocation blocks credential authentication after commit; in-flight requests
+        may finish. JWT login remains recovery. Idempotent by resource semantics,
+        not by Idempotency-Key. Historical charges remain in owner usage.
+      parameters:
+        - $ref: 'v1.yaml#/components/parameters/KeyId'
+      responses:
+        '204':
+          description: Revoked; empty body, no Content-Type.
+          headers:
+            Cache-Control: { schema: { const: no-store } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: 'v1.yaml#/components/responses/KeyNotFound' }
+        '422': { $ref: 'v1.yaml#/components/responses/ValidationError' }
+        '500': { $ref: 'v1.yaml#/components/responses/InternalError' }
+  /api/portal/usage:
+    get:
+      operationId: getPortalUsage
+      summary: Read authoritative current-period owner usage
+      description: |
+        No query parameters or arbitrary period selection. Coherent database view,
+        not a pushed dashboard or second counter. All owner keys and billable v0/v1
+        operations share 1,000 calls per UTC calendar month, settled before success
+        delivery. Period start inclusive, end exclusive; period_end is reset time.
+        Revocation never removes historical charges. Storage failure returns 500,
+        never fake zero. Matching active billed retries can remain free across the
+        month boundary until their fixed 24-hour expiry; see v1 billing rules.
+      responses:
+        '200': { $ref: 'v1.yaml#/components/responses/Usage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: 'v1.yaml#/components/responses/NotFound' }
+        '422': { $ref: 'v1.yaml#/components/responses/ValidationError' }
+        '500': { $ref: 'v1.yaml#/components/responses/InternalError' }
+components:
+  securitySchemes:
+    BearerPortalJwt: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Unauthenticated:
+      description: Missing, malformed, invalid JWT or deleted session owner; API keys cannot substitute. Log in and provide the portal session token.
+      headers:
+        Cache-Control: { schema: { const: no-store } }
+      content:
+        application/json:
+          schema: { $ref: 'v1.yaml#/components/schemas/Error401' }

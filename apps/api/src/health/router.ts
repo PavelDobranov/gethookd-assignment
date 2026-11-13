@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { type RequestHandler, Router } from "express";
 
 import type { createDatabase } from "../db/client.js";
+import { errorBody } from "../shared/errors.js";
 import { disableCaching } from "../shared/middleware/disable-caching.js";
 
 type HealthRouterDependencies = {
@@ -15,9 +16,7 @@ function createHealthHandler(db: HealthRouterDependencies["db"]): RequestHandler
 
       res.json({ status: "ok" });
     } catch {
-      res.status(503).json({
-        error: { code: "SERVICE_UNAVAILABLE", message: "Service unavailable." },
-      });
+      res.status(503).json(errorBody("SERVICE_UNAVAILABLE", "Service unavailable."));
     }
   };
 }

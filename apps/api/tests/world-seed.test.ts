@@ -11,6 +11,7 @@ import { generateFixtures } from "../src/db/fixtures.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
 import { seedDatabase } from "../src/db/seed.js";
 import { seedWorld } from "../src/db/seed-world.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 // Both databases belong exclusively to the disposable PostgreSQL test server.
 const postgresUrl = inject("postgresUrl");
@@ -40,6 +41,8 @@ async function readRecords() {
     UNION ALL SELECT 'brands', id::text, row_to_json(b)::text FROM brands b
     UNION ALL SELECT 'users', id::text, row_to_json(u)::text FROM users u
     UNION ALL SELECT 'api_keys', id::text, row_to_json(k)::text FROM api_keys k
+    UNION ALL SELECT 'monthly_usage', owner_id::text || '/' || period_start::text, row_to_json(m)::text FROM monthly_usage m
+    UNION ALL SELECT 'billing_bindings', api_key_id::text || '/' || value_hash, row_to_json(b)::text FROM billing_bindings b
     ORDER BY 1, 2
   `);
   return rows;
@@ -58,17 +61,40 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   for (const { db } of connections) {
-    await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
+    await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
+    expect(
+      (
+        await db.execute(sql`SELECT (SELECT count(*)::int FROM monthly_usage) AS usage,
+      (SELECT count(*)::int FROM billing_bindings) AS bindings`)
+      ).rows,
+    ).toEqual([{ usage: 0, bindings: 0 }]);
   }
 });
 afterAll(async () => {
   await Promise.all(connections.map((connection) => connection.close()));
 });
 
+// Keep every original M2 field in deterministic comparisons; transaction
+// metadata is checked separately and full records still guard repeat seeding.
+const adDomainColumns = {
+  id: ads.id,
+  brandId: ads.brandId,
+  headline: ads.headline,
+  bodyText: ads.bodyText,
+  niche: ads.niche,
+  format: ads.format,
+  status: ads.status,
+  startDate: ads.startDate,
+  endDate: ads.endDate,
+  impressionRank: ads.impressionRank,
+  countries: ads.countries,
+  discoveredAt: ads.discoveredAt,
+};
+
 async function readWorld(db: typeof first.db) {
   return {
     brands: await db.select().from(brands).orderBy(brands.id),
-    ads: await db.select().from(ads).orderBy(ads.id),
+    ads: await db.select(adDomainColumns).from(ads).orderBy(ads.id),
   };
 }
 
@@ -78,6 +104,13 @@ it("persists identical complete ordered worlds in two independently initialized 
   const world = await readWorld(first.db);
   expect(await readWorld(second.db)).toEqual(world);
   expect(world).toEqual(generateFixtures());
+  for (const { db } of connections) {
+    const markers = await db.select({ insertedXid: ads.insertedXid }).from(ads);
+    expect(markers).toHaveLength(20_000);
+    for (const { insertedXid } of markers) expect(insertedXid).toMatch(/^\d+$/);
+    // Seed's explicit-column batches all share one insertion transaction.
+    expect(new Set(markers.map(({ insertedXid }) => insertedXid)).size).toBe(1);
+  }
   // Password salts and generated user/key UUIDs are intentionally not compared.
   expect(world.brands).toHaveLength(300);
   expect(world.ads).toHaveLength(20_000);
@@ -150,7 +183,19 @@ it("preserves all evolved records through initialization and seed while restorin
     .values({ username: "unrelated", passwordHash: "test-only-hash" })
     .returning();
   await db.update(apiKeys).set({ userId: unrelated.id });
-  await db.insert(apiKeys).values({ userId: unrelated.id, keyHash: "unrelated-key-hash" });
+  await db.insert(apiKeys).values(apiKeyFixture(unrelated.id, "unrelated-key-hash"));
+  const [unrelatedKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, "unrelated-key-hash"));
+  expect(unrelatedKey).toEqual({
+    id: expect.any(String),
+    userId: unrelated.id,
+    keyHash: "unrelated-key-hash",
+    prefix: "test-fixture",
+    scopes: ["search:read", "keys:manage"],
+    createdAt: expect.any(Date),
+    lastUsedAt: null,
+    revokedAt: null,
+    rateAdmissions: [],
+  });
   await db.update(brands).set({ name: "Evolved brand" }).where(eq(brands.id, 2));
   await db
     .update(ads)
@@ -180,20 +225,23 @@ it("preserves all evolved records through initialization and seed while restorin
   await db.insert(ads).values({ ...nullRanked, id: "unrelated-ad", brandId: 999 });
   await db.execute(sql`UPDATE ads SET discovered_at = '2026-10-06T12:00:00.123456Z'
     WHERE id = 'ingest-ad-occupied-highest-rank'`);
+  await db.execute(sql`INSERT INTO monthly_usage VALUES (${unrelated.id}, '2028-02-01', 12)`);
+  await db.execute(sql`INSERT INTO billing_bindings VALUES
+    (${unrelatedKey.id}, 'value-hash', 'fingerprint-hash', '2028-02-29T12:00:00.123456Z', '2028-03-01T12:00:00.123456Z')`);
   const before = await readRecords();
   const initialize = await run("npm", ["run", "db:initialize"], {
     env: { ...process.env, DATABASE_URL: first.url },
     timeout: 8000,
   });
   expect(initialize.stderr).toBe("");
-  const [repaired] = await db.select().from(ads).where(eq(ads.id, ranked.id));
+  const [repaired] = await db.select(adDomainColumns).from(ads).where(eq(ads.id, ranked.id));
   expect(repaired).toEqual({
     ...ranked,
     impressionRank: ranked.impressionRank + 1,
   });
-  expect(await db.select().from(ads).where(eq(ads.id, nullRanked.id))).toEqual([nullRanked]);
+  expect(await db.select(adDomainColumns).from(ads).where(eq(ads.id, nullRanked.id))).toEqual([nullRanked]);
   expect(await db.select().from(brands).where(eq(brands.id, 300))).toEqual([fixtures.brands[299]]);
-  expect(await db.select().from(ads).where(eq(ads.brandId, 300)).orderBy(ads.id)).toEqual(
+  expect(await db.select(adDomainColumns).from(ads).where(eq(ads.brandId, 300)).orderBy(ads.id)).toEqual(
     fixtures.ads.filter((ad) => ad.brandId === 300),
   );
   const restored = new Set([
@@ -264,7 +312,7 @@ it.each([2_147_483_646, 2_147_483_647])(
       expect(JSON.stringify(await readRecords()) === JSON.stringify(before)).toBe(true);
     } else {
       await seed();
-      const [repaired] = await db.select().from(ads).where(eq(ads.id, ranked.id));
+      const [repaired] = await db.select(adDomainColumns).from(ads).where(eq(ads.id, ranked.id));
       expect(repaired).toEqual({ ...ranked, impressionRank: 2_147_483_647 });
       const after = await readRecords();
       expect(after.length).toBe(before.length + 1);
