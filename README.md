@@ -613,6 +613,18 @@ while holding the owner lock. Timestamp strings/SQL retain microseconds; a JS
 holds these locks across ad reads or network delivery. Timeout failures roll back;
 PostgreSQL transaction-timeout session termination requires pool reconnection.
 
+`src/usage/admission.ts` authenticates a full credential under a hash-matching
+key-row `FOR UPDATE` lock, rejects revoked keys, then samples database time.
+It commits monotone last-used and retains only instants strictly newer than
+60 seconds ago. Below 60 retained admissions it appends the current instant;
+otherwise it returns a denial with ceil `Retry-After` (at least one second),
+without appending or extending the window. Invalid/revoked attempts change no
+usage state. Independent pools/processes share this durable per-key allowance;
+other keys remain independent. Operational failures propagate without admission.
+Callers must await this commit before scope/input/read/settlement work and must
+not use the standalone credential lookup as a control bypass. HTTP wiring is
+still pending; portal JWT authentication is unchanged.
+
 `src/usage/billing.ts` provides internal settlement and owner usage operations;
 HTTP enforcement is not connected yet. Callers must authenticate first, supply
 only hashed binding identities and fully prepare/serialize a successful result
