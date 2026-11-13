@@ -9,6 +9,7 @@ export default defineConfig({
           include: ["tests/**/*.test.ts"],
           exclude: [
             "tests/accounting-locks.test.ts",
+            "tests/billing.test.ts",
             "tests/key-lifecycle.test.ts",
             "tests/v1-openapi.test.ts",
             "tests/v1-search.test.ts",
@@ -36,6 +37,7 @@ export default defineConfig({
           fileParallelism: false,
           include: [
             "tests/accounting-locks.test.ts",
+            "tests/billing.test.ts",
             "tests/key-lifecycle.test.ts",
             "tests/v1-openapi.test.ts",
             "tests/v1-search.test.ts",

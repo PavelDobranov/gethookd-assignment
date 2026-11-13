@@ -613,6 +613,31 @@ while holding the owner lock. Timestamp strings/SQL retain microseconds; a JS
 holds these locks across ad reads or network delivery. Timeout failures roll back;
 PostgreSQL transaction-timeout session termination requires pool reconnection.
 
+`src/usage/billing.ts` provides internal settlement and owner usage operations;
+HTTP enforcement is not connected yet. Callers must authenticate first, supply
+only hashed binding identities and fully prepare/serialize a successful result
+before settlement. A live matching binding is free without extending expiry;
+a different fingerprint conflicts before quota. Missing/expired bindings and
+no-header calls charge the current UTC month atomically, only below 1,000, across
+all owner keys. Binding namespaces remain per-key. Expiry is exactly 24 elapsed
+hours; at expiry reuse charges again. Usage reads the same authoritative aggregate
+and exposes its UTC start/end, billed calls, quota and remaining calls.
+
+Each settlement deletes at most 100 expired bindings for its current key, using
+`(api_key_id, expires_at)`. Dormant-key expired rows await billing traffic on that
+same key: semantic expiry is **not** a physical 24-hour deletion guarantee. Live
+bindings and historical monthly aggregates are retained; revocation never reduces
+usage. Cleanup failure rolls back settlement rather than allowing unmetered
+success. There is no timer, reset scheduler, response replay store or second UI
+meter. Owner serialization is a deliberate throughput limit of this simple design.
+
+A committed settlement survives lost delivery or a new process/pool. Never retry
+an ambiguous commit automatically: a later same-header request resolves the
+retained binding; without a header, another successful call is another charge.
+Do not send a billable success until settlement has committed. HTTP delivery,
+canonical header/fingerprint parsing and rolling admission integration remain
+separate M4 slices.
+
 ### Repeat-safe world and demo seeding
 
 After migrations, run `npm run db:seed -w @gethookd/api`. Public local credentials
