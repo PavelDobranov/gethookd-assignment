@@ -15,15 +15,20 @@ This technical-assessment repository is an **npm-workspaces monorepo** with thre
 
 ## Architecture
 
-```text
-Browser ──▶ Web (React / Vite or Nginx) ── /api proxy ──┐
-                                                      │
-MCP client ──▶ MCP (Streamable HTTP, :3001) ── HTTP ───┤
-                                                      ▼
-                                              API (Express, :3000)
-                                                      │
-                                                      ▼
-                                                PostgreSQL 17
+```mermaid
+flowchart LR
+    B[Browser]
+    W[Web App<br/>React + Vite<br/>or Nginx in Docker]
+    C[MCP Client]
+    M[MCP Server<br/>Streamable HTTP<br/>127.0.0.1:3001]
+    A[REST API<br/>Express<br/>127.0.0.1:3000]
+    D[(PostgreSQL 17)]
+
+    B -->|UI + /api requests| W
+    W -->|Reverse proxy /api| A
+    C -->|MCP calls| M
+    M -->|HTTP only| A
+    A -->|SQL| D
 ```
 
 | Component | Responsibility |
