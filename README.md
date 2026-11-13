@@ -234,9 +234,9 @@ The public defaults are **local development fixtures**. Changing `POSTGRES_*` do
 
 ## Documentation
 
-- [Design overview and trade-offs](docs/DESIGN.md)
-- [Notes on AI use](docs/AI_NOTES.md)
-- [Engineering/agent conventions](docs/agents/) and [AGENTS.md](AGENTS.md)
+- [Design overview and trade-offs - DESIGN.md](docs/DESIGN.md)
+- [Notes on AI use - AI_NOTES.md](docs/AI_NOTES.md)
+- [Agent conventions](docs/agents/) and [AGENTS.md](AGENTS.md)
 - [OpenAPI contracts](docs/openapi/): [v1 REST](docs/openapi/v1.yaml) and [Portal](docs/openapi/portal.yaml)
 
 Milestone specifications, plans, and progress are tracked in **GitHub Issues** as the source of truth.
