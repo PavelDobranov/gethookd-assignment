@@ -48,8 +48,10 @@ The repository is an npm-workspaces monorepo with two applications — a backend
 
 - **MCP server — `apps/mcp` (M5 in progress).** Independent Streamable HTTP server
   on loopback port `3001`, calling the API over HTTP only. All three tools are
-  HTTP-backed; caller credential forwarding remains unfinished.
-  The protected API still requires a valid key. See [MCP setup and limits](apps/mcp/README.md).
+  HTTP-backed, and each invocation forwards the caller's own `Authorization: Bearer
+  <key>` to REST per request — no shared key or API bypass. The protected API remains
+  the sole authority for key validity, scopes, revocation, rate limits and billing;
+  model evaluation is the remaining M5 work. See [MCP setup and limits](apps/mcp/README.md).
 
 ### How the parts communicate
 

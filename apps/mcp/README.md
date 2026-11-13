@@ -175,6 +175,26 @@ concurrent callers stay isolated.
 
 - Model evaluation evidence (`MCP_EVAL.md`).
 
+## Known limits and deferrals
+
+These are explicit M5 scope decisions (specification #118), recorded here rather
+than claimed as met. See ADR-0005 for the shared-control rationale.
+
+- **No enforced response size budget (unmet MUST).** Tool payloads reproduce the
+  REST search summaries and complete ad details verbatim — no truncation, reshaping
+  or advanced size handling. Compact search fields and the 100-result maximum are
+  **not** a hard per-result bound, so large headlines and full ad details can consume
+  substantial model context. The enforced byte/token/per-result size-budget MUST is
+  unmet by explicit user decision; oversized-response handling is deferred.
+- **First-call detection deferred.** The portal Connect Claude Code panel ships
+  without a first-call indicator or connection check; a successful connection is
+  never asserted by the panel.
+- **Playwright / browser E2E deferred.** No Playwright or browser end-to-end suite is
+  introduced; component tests plus manual real-browser verification cover the panel.
+- **Automated evaluation replay deferred.** Real-model evaluation is run manually and
+  recorded in `docs/MCP_EVAL.md`; it is not part of ordinary `npm test`.
+
 Authentication, authorization, scopes, rate limiting, metering and billing stay
-in the REST API. MCP does not retry requests; operational failures may have an
-unknown delivery outcome.
+in the REST API. Both v0 and v1 surface the shared `RATE_LIMITED` 429 when a key's
+allowance is exhausted, and MCP propagates REST's wait guidance unchanged. MCP does
+not retry requests; operational failures may have an unknown delivery outcome.
