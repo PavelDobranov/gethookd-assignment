@@ -1,11 +1,8 @@
-import type { ErrorRequestHandler, Response } from "express";
+import type { Response } from "express";
 
-export type ValidationDetail = {
-  parameter: string;
-  reason: string;
-  allowed_values: string[];
-  suggestion: string | null;
-};
+import { sendHttpError, type ValidationDetail } from "../../shared/http-errors.js";
+
+export { handleErrors, type ValidationDetail } from "../../shared/http-errors.js";
 
 const errors = {
   UNAUTHENTICATED: {
@@ -59,12 +56,5 @@ export function sendError(res: Response, code: keyof typeof errors, details: Val
   const next_action = requiresBrand
     ? "Add one brand_id, or use sort=newest for cross-brand search."
     : definition.next_action;
-  res
-    .status(definition.status)
-    .json({ error: { code, message, next_action, retryable: definition.status === 500, details } });
+  sendHttpError(res, code, { status: definition.status, message, next_action }, details);
 }
-
-export const handleErrors: ErrorRequestHandler = (_error, _req, res, _next) => {
-  // Raw exceptions can include SQL, credentials and cursor contents. Never log them.
-  sendError(res, "INTERNAL_ERROR");
-};
