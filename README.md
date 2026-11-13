@@ -646,9 +646,26 @@ meter. Owner serialization is a deliberate throughput limit of this simple desig
 A committed settlement survives lost delivery or a new process/pool. Never retry
 an ambiguous commit automatically: a later same-header request resolves the
 retained binding; without a header, another successful call is another charge.
-Do not send a billable success until settlement has committed. HTTP delivery,
-canonical header/fingerprint parsing and rolling admission integration remain
-separate M4 slices.
+Do not send a billable success until settlement has committed. HTTP delivery
+and shared-control integration remain separate M4 slices.
+
+`src/usage/identity.ts` provides pure billing identities for later HTTP adapters.
+Billable operations may accept one case-insensitive `Idempotency-Key` header
+name with a case-sensitive opaque value: 1–128 ASCII letters, digits, `.`, `_`,
+`:`, or `-`, allowing only transport spaces/tabs around it. Parse raw header
+pairs so duplicate names cannot be hidden by header merging. Invalid/duplicate
+values raise a sanitized domain validation error. Missing means no binding;
+free endpoints must not call this parser and no automatic identity is generated.
+Only SHA-256 hashes of values and canonical request tuples reach settlement.
+
+Fingerprints allowlist existing effective parser outputs: v0 filters and clamped
+pagination without the credential; v1 normalized filters/sort/limit plus the
+supplied continuation cursor, if any; detail uses the exact once-decoded opaque
+ID. Equivalent defaults, ordering and inherited/partially repeated continuation
+filters agree. Meaningful text case/internal whitespace, versions, operations,
+cursors and page sizes remain distinct. Raw URLs, credentials, newly generated
+response cursors and live results never enter fingerprints. These helpers do not
+yet enable the header, charging or rate enforcement on REST routes.
 
 ### Repeat-safe world and demo seeding
 
