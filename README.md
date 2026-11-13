@@ -11,7 +11,7 @@ This technical-assessment repository is an **npm-workspaces monorepo** with thre
 - **MCP tools:** `search_ads`, `get_ad`, and `list_niches` exposed over Streamable HTTP.
 - **Shared API controls:** Authentication, scopes, rate limits, idempotency, and usage/billing are enforced by the REST API rather than duplicated in MCP.
 
-**M5 status:** The MCP server and its three REST-backed tools are implemented. Each tool call forwards the caller's own `Authorization: Bearer <key>` to the REST API per request — no shared key or API bypass — so REST stays the sole authority for key validity, scopes, revocation, rate limits, and billing. Protocol tests exercise the tools against a controlled HTTP API fixture. Real-model evaluation evidence is the remaining M5 work. See [MCP implementation and limitations](apps/mcp/README.md).
+**M5 status:** The MCP server and its three REST-backed tools are implemented. Each tool call forwards the caller's own `Authorization: Bearer <key>` to the REST API per request — no shared key or API bypass — so REST stays the sole authority for key validity, scopes, revocation, rate limits, and billing. Protocol tests exercise the tools against a controlled HTTP API fixture. Real-model evaluation evidence is the remaining M5 work. See [MCP Server](#mcp-server).
 
 ## Architecture
 
@@ -77,7 +77,7 @@ With the API running:
 npm run dev -w @gethookd/mcp
 ```
 
-The Streamable HTTP endpoint is <http://127.0.0.1:3001/mcp>. MCP is **not** included in the root `npm run dev` command or in Docker Compose. See [apps/mcp/README.md](apps/mcp/README.md) for client connection, tool inputs, configuration, and credential forwarding.
+The Streamable HTTP endpoint is <http://127.0.0.1:3001/mcp>. MCP is **not** included in the root `npm run dev` command or in Docker Compose. See [MCP Server](#mcp-server) for client connection, tool inputs, and credential forwarding.
 
 ## Docker Demo (API + Web)
 
@@ -119,6 +119,46 @@ Avoid `docker compose down -v` unless you intend to delete the stored database d
 4. **MCP:** Connect a Streamable HTTP client to `http://127.0.0.1:3001/mcp` to discover the three tools. Each call must carry a stored API key in `Authorization: Bearer <key>`; the server forwards it unchanged to the REST API, which enforces the key's scope and quota. Integration tests exercise tool behavior against an HTTP fixture.
 
 Keep revealed keys and JWTs private; do not commit them or paste them into issues.
+
+## MCP Server
+
+`apps/mcp` exposes GetHookd ad search to AI agents over **Streamable HTTP**, calling the REST API over HTTP only — never the database. It is stateless and loopback-bound: a fresh instance serves each request, and non-localhost `Host`/`Origin` requests get a `403` (DNS-rebinding protection).
+
+**Authentication.** Each tool call forwards the caller's own `Authorization: Bearer <key>` to the matching REST request. There is no shared key or bypass, so REST remains the sole authority for key validity, scopes, revocation, rate limits, and billing. A missing, malformed, or duplicate header is rejected locally with `UNAUTHENTICATED` guidance and never reaches REST. Credentials are request-scoped — never stored, cached, logged, or placed in tool arguments or URLs.
+
+### Run
+
+With the API running (port `3000`):
+
+```sh
+npm run dev -w @gethookd/mcp                                      # watch mode
+npm run build -w @gethookd/mcp && npm run start -w @gethookd/mcp  # build and start
+```
+
+The single endpoint is `POST http://127.0.0.1:3001/mcp`. MCP is **not** part of `npm run dev` or Docker Compose; run it separately. Configuration (`MCP_HOST`, `MCP_PORT`, `API_BASE_URL`) is read from the process environment — see [Configuration](#configuration).
+
+### Connect a client
+
+Point any Streamable HTTP MCP client at `http://127.0.0.1:3001/mcp`, passing your reveal-once `search:read` key as the Bearer credential. For Claude Code:
+
+```sh
+claude mcp add --transport http gethookd http://127.0.0.1:3001/mcp \
+  --header "Authorization: Bearer <YOUR_API_KEY>"
+```
+
+The portal's **Connect Claude Code** panel shows this same template with a copy button. Prefer an environment reference (`Bearer $GETHOOKD_API_KEY`) over a literal key where your client supports it, and never commit a key.
+
+### Tools
+
+| Tool | Purpose | Inputs |
+| --- | --- | --- |
+| `search_ads` | Search ads and return compact summaries. | `q`, `niche[]`, `format`, `status`, `started_after`, `brand_id`, `sort`, `limit`, `cursor`, `idempotency_key` (all optional) |
+| `get_ad` | Retrieve full details for one ad. | `id` (required), `idempotency_key` (optional) |
+| `list_niches` | Discover valid niche slugs and display names. | none |
+
+Tools follow the v1 search contract and preserve REST responses verbatim: omitted filters inherit REST normalization and cursor defaults, REST error envelopes pass through (`isError: true`), and MCP never retries automatically. A reused `idempotency_key` requests REST billing deduplication (not response replay); `list_niches` and failed reads are not billed.
+
+**Limits (M5 deferrals).** There is no enforced response-size budget — search summaries and full ad details are reproduced verbatim, so large payloads can consume model context. Portal first-call detection, Playwright/browser E2E, and automated evaluation replay are deferred; real-model evaluation evidence (`docs/MCP_EVAL.md`) is the remaining M5 work. See [ADR-0005](docs/adr/) for the shared-control rationale.
 
 ## Development
 
@@ -203,5 +243,5 @@ Milestone specifications, plans, and progress are tracked in **GitHub Issues** a
 
 ## Known Limitations
 
-- **M5 — evaluation pending:** Caller Bearer-key forwarding is implemented and REST enforces all shared controls; the remaining M5 item is real-model evaluation evidence (`MCP_EVAL.md`). Oversized MCP result-size limiting, portal first-call detection, Playwright/browser E2E, and automated evaluation replay are deferred by decision — see [apps/mcp/README.md](apps/mcp/README.md).
+- **M5 — evaluation pending:** Caller Bearer-key forwarding is implemented and REST enforces all shared controls; the remaining M5 item is real-model evaluation evidence (`MCP_EVAL.md`). Oversized MCP result-size limiting, portal first-call detection, Playwright/browser E2E, and automated evaluation replay are deferred by decision — see [MCP Server](#mcp-server).
 - **Local demo only:** Default credentials, secrets, and Docker configuration are not production-ready.
