@@ -47,8 +47,8 @@ The repository is an npm-workspaces monorepo with two applications — a backend
   committed SQL migrations under `apps/api/drizzle/`.
 
 - **MCP server — `apps/mcp` (M5 in progress).** Independent Streamable HTTP server
-  on loopback port `3001`, calling the API over HTTP only. `list_niches` is
-  HTTP-backed alongside `get_ad`; search and caller credential forwarding remain unfinished.
+  on loopback port `3001`, calling the API over HTTP only. All three tools are
+  HTTP-backed; caller credential forwarding remains unfinished.
   The protected API still requires a valid key. See [MCP setup and limits](apps/mcp/README.md).
 
 ### How the parts communicate

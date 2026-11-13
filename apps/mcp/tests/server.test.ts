@@ -57,7 +57,18 @@ describe("MCP server", () => {
 
     const properties = (searchAds?.inputSchema.properties ?? {}) as Record<string, unknown>;
     expect(Object.keys(properties).sort()).toEqual(
-      ["brand_id", "cursor", "format", "limit", "niche", "q", "sort", "started_after", "status"].sort(),
+      [
+        "brand_id",
+        "cursor",
+        "format",
+        "idempotency_key",
+        "limit",
+        "niche",
+        "q",
+        "sort",
+        "started_after",
+        "status",
+      ].sort(),
     );
   });
 
@@ -80,14 +91,15 @@ describe("MCP server", () => {
     expect(Object.keys(properties)).toHaveLength(0);
   });
 
-  it("returns an explicit not-implemented error for valid tool calls", async () => {
+  it("returns a safe tool error when REST cannot be reached", async () => {
     const calls = [client.callTool({ name: "search_ads", arguments: { q: "serum", niche: ["skincare"] } })];
 
     for (const call of calls) {
       const result = await call;
       expect(result.isError).toBe(true);
       const [block] = result.content as Array<{ type: string; text: string }>;
-      expect(block.text).toContain("NOT_IMPLEMENTED");
+      expect(block.text).toContain("API_UNAVAILABLE");
+      expect(block.text).not.toContain("NOT_IMPLEMENTED");
     }
   });
 

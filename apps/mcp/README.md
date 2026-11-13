@@ -4,9 +4,8 @@ MCP server for GetHookd. It exposes GetHookd ad search to MCP clients (AI agents
 over **Streamable HTTP**, calling the REST API (`apps/api`) over HTTP — never
 the database directly.
 
-This is an **intermediate M5 implementation**: `list_niches` and `get_ad` are
-HTTP-backed; `search_ads` remains an explicit placeholder. Caller credential
-forwarding is not connected yet, so the protected real API rejects tool calls
+This is an **intermediate M5 implementation**: all three tools are HTTP-backed.
+Caller credential forwarding is not connected yet, so the protected real API rejects tool calls
 with its unchanged authentication error. No shared key or API bypass is provided.
 
 ## Running
@@ -59,15 +58,20 @@ no session state is kept. Loopback Host/Origin guards run in front of the handle
 
 ## Tools
 
-| Tool          | Purpose                                                        | Inputs                                                                                                    |
-| ------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `search_ads`  | Search ads and return compact summaries.                       | `q`, `niche[]`, `format`, `status`, `started_after`, `brand_id`, `sort`, `limit`, `cursor` (all optional) |
-| `get_ad`      | Retrieve full details for one already-identified ad.           | `id` (required, opaque string), `idempotency_key` (optional)                                              |
-| `list_niches` | Discover valid niche slugs and display names for `search_ads`. | none                                                                                                      |
+| Tool          | Purpose                                                        | Inputs                                                                                                                       |
+| ------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `search_ads`  | Search ads and return compact summaries.                       | `q`, `niche[]`, `format`, `status`, `started_after`, `brand_id`, `sort`, `limit`, `cursor`, `idempotency_key` (all optional) |
+| `get_ad`      | Retrieve full details for one already-identified ad.           | `id` (required, opaque string), `idempotency_key` (optional)                                                                 |
+| `list_niches` | Discover valid niche slugs and display names for `search_ads`. | none                                                                                                                         |
 
-`search_ads` follows the v1 search contract: niches are passed as an array of
-slugs, `sort=impressions` requires a `brand_id` (impression ranks compare ads
-only within a single brand), and extra pages come from the `cursor`.
+`search_ads` follows the v1 search contract: niches are sent as repeated query
+parameters (OR within niches), `started_after` is an exclusive calendar boundary,
+and `sort=impressions` requires an effective `brand_id` (ranks compare ads only
+within that brand). A continuation may inherit its brand from the unchanged
+opaque `cursor`. Omitted filters/sort/limit stay omitted so REST applies its own
+normalization, cursor inheritance and page-size default. A supplied limit may
+change between pages. Empty `niche: []` is rejected: omit it to inherit, or start
+a fresh search without a cursor to clear filters.
 
 ## Status: implemented vs. remaining
 
@@ -87,20 +91,23 @@ only within a single brand), and extra pages come from the `cursor`.
   REST detail JSON in one text block, including long copy and nulls. IDs are
   encoded as one segment without trimming or numeric interpretation; even exact
   `.` and `..` IDs retain their encoded path rather than becoming another route.
-- Optional `get_ad.idempotency_key` accepts 1–128 case-sensitive ASCII letters,
+- Optional `get_ad`/`search_ads` `idempotency_key` accepts 1–128 case-sensitive ASCII letters,
   digits, `.`, `_`, `:` or `-`, and is forwarded only as `Idempotency-Key`.
   Omission generates no identity; repeated no-header calls remain separate reads.
   Reusing a supplied key requests REST billing deduplication, not response replay.
-- Invalid arguments are rejected by SDK schema validation; `get_ad` also rejects
-  unknown arguments. `search_ads` still returns `NOT_IMPLEMENTED` for valid inputs.
+- `search_ads` makes one `GET /api/v1/ads`, forwards supplied filter values
+  without normalizing or injecting defaults, and preserves the complete REST
+  response: summaries (including full headlines/null ranks), normalized filter
+  echo, effective sort/limit, next cursor and fixed expiry. REST cursor and
+  validation errors retain their envelope; MCP does not restart searches.
+- Invalid arguments are rejected by SDK schema validation; `get_ad` and
+  `search_ads` reject unknown arguments. Keyword limits count Unicode code points
+  after outer whitespace, without altering the forwarded text.
 - Integration tests drive the real MCP protocol with the official client and
   a controlled HTTP API fixture; discovery does not make API requests.
 
 **Remaining for M5:**
 
-- Implement `search_ads` against the REST API via `api-client.ts`:
-  translate MCP inputs into v1 REST requests (including repeated `niche` query
-  parameters) and map REST responses into model-friendly output.
 - Forward the caller's API key as a Bearer credential to the REST API; reuse the
   v1 REST error codes rather than inventing an MCP-specific taxonomy.
 - Model evaluation evidence (`MCP_EVAL.md`).

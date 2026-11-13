@@ -13,7 +13,7 @@ import { registerSearchAds } from "./tools/search-ads.js";
 export function createMcpServer(apiClient: ApiClient): McpServer {
   const server = new McpServer({ name: "gethookd-mcp", version: "0.1.0" });
 
-  registerSearchAds(server);
+  registerSearchAds(server, apiClient);
   registerGetAd(server, apiClient);
   registerListNiches(server, apiClient);
 
