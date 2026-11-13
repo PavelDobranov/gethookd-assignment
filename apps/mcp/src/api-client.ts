@@ -76,12 +76,19 @@ const errorSchema = z.looseObject({
 
 type ApiResult<T> = { isError: false; body: T } | { isError: true; body: z.infer<typeof errorSchema> };
 
-/** HTTP-only boundary. No API implementation imports, credentials, retries or redirects. */
+/**
+ * HTTP-only boundary. No API implementation imports, stored credentials, retries
+ * or redirects. Each call forwards the caller's Bearer credential for that single
+ * request; REST remains the sole authority for key state, scopes and billing.
+ */
 export type ApiClient = {
   readonly baseUrl: string;
-  listNiches(): Promise<ApiResult<z.infer<typeof nichesSchema>>>;
-  getAd(input: { id: string; idempotency_key?: string }): Promise<ApiResult<z.infer<typeof adDetailSchema>>>;
-  searchAds(input: SearchAdsInput): Promise<ApiResult<z.infer<typeof searchResponseSchema>>>;
+  listNiches(authorization: string): Promise<ApiResult<z.infer<typeof nichesSchema>>>;
+  getAd(
+    input: { id: string; idempotency_key?: string },
+    authorization: string,
+  ): Promise<ApiResult<z.infer<typeof adDetailSchema>>>;
+  searchAds(input: SearchAdsInput, authorization: string): Promise<ApiResult<z.infer<typeof searchResponseSchema>>>;
 };
 
 function operationalError(message: string): ApiResult<never> {
@@ -122,9 +129,19 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
   }
   const transport = origin.protocol === "https:" ? httpsRequest : httpRequest;
 
-  async function get<T>(path: string, schema: z.ZodType<T>, idempotencyKey?: string): Promise<ApiResult<T>> {
+  async function get<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    authorization: string,
+    idempotencyKey?: string,
+  ): Promise<ApiResult<T>> {
     const signal = AbortSignal.timeout(timeoutMs);
     let response: { status: number; text: string };
+    // Forward only the caller's credential (and optional idempotency identity);
+    // no unrelated inbound header is passed through, and the key never enters the
+    // URL. REST validates the key and resolves scopes, revocation and billing.
+    const headers: Record<string, string> = { Authorization: authorization };
+    if (idempotencyKey !== undefined) headers["Idempotency-Key"] = idempotencyKey;
     try {
       response = await new Promise((resolve, reject) => {
         // Keep path separate from the URL: even percent-encoded dot segments
@@ -135,7 +152,7 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
             method: "GET",
             path,
             signal,
-            headers: idempotencyKey === undefined ? {} : { "Idempotency-Key": idempotencyKey },
+            headers,
           },
           (incoming) => {
             const chunks: Buffer[] = [];
@@ -176,12 +193,12 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
 
   return {
     baseUrl: origin.origin,
-    listNiches: () => get("/api/v1/niches", nichesSchema),
-    getAd({ id, idempotency_key }) {
+    listNiches: (authorization) => get("/api/v1/niches", nichesSchema, authorization),
+    getAd({ id, idempotency_key }, authorization) {
       const segment = id === "." || id === ".." ? id.replaceAll(".", "%2E") : encodeURIComponent(id);
-      return get(`/api/v1/ads/${segment}`, adDetailSchema, idempotency_key);
+      return get(`/api/v1/ads/${segment}`, adDetailSchema, authorization, idempotency_key);
     },
-    searchAds({ idempotency_key, ...filters }) {
+    searchAds({ idempotency_key, ...filters }, authorization) {
       const query = new URLSearchParams();
       for (const [name, value] of Object.entries(filters)) {
         if (value === undefined) continue;
@@ -192,7 +209,7 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
         }
       }
       const suffix = query.size === 0 ? "" : `?${query}`;
-      return get(`/api/v1/ads${suffix}`, searchResponseSchema, idempotency_key);
+      return get(`/api/v1/ads${suffix}`, searchResponseSchema, authorization, idempotency_key);
     },
   };
 }

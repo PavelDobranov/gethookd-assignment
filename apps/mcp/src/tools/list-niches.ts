@@ -18,8 +18,8 @@ export function registerListNiches(server: McpServer, apiClient: ApiClient): Too
       description,
       inputSchema: z.strictObject({}),
     },
-    async () => {
-      const { isError, body } = await apiClient.listNiches();
+    async (_input, authorization) => {
+      const { isError, body } = await apiClient.listNiches(authorization);
       return { isError, content: [{ type: "text", text: JSON.stringify(body) }] };
     },
   );

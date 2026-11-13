@@ -32,8 +32,8 @@ export function registerGetAd(server: McpServer, apiClient: ApiClient): ToolDisp
           ),
       }),
     },
-    async (input) => {
-      const { isError, body } = await apiClient.getAd(input);
+    async (input, authorization) => {
+      const { isError, body } = await apiClient.getAd(input, authorization);
       return { isError, content: [{ type: "text", text: JSON.stringify(body) }] };
     },
   );

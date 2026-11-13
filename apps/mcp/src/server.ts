@@ -1,7 +1,8 @@
 import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 
 import type { ApiClient } from "./api-client.js";
-import { internalToolError, type ToolDispatch, validationToolError } from "./tool-dispatch.js";
+import type { CredentialResult } from "./credentials.js";
+import { authenticationToolError, internalToolError, type ToolDispatch, validationToolError } from "./tool-dispatch.js";
 import { registerGetAd } from "./tools/get-ad.js";
 import { registerListNiches } from "./tools/list-niches.js";
 import { registerSearchAds } from "./tools/search-ads.js";
@@ -9,9 +10,10 @@ import { registerSearchAds } from "./tools/search-ads.js";
 /**
  * Creates an MCP server with the three GetHookd tools registered. A fresh
  * instance is built per request by the stateless HTTP handler, so this holds no
- * state between calls.
+ * state between calls. The request's `credential` is captured here, so parallel
+ * callers each dispatch with their own key and cannot cross-contaminate.
  */
-export function createMcpServer(apiClient: ApiClient): McpServer {
+export function createMcpServer(apiClient: ApiClient, credential: CredentialResult): McpServer {
   const server = new McpServer({ name: "gethookd-mcp", version: "0.1.0" });
 
   const tools = new Map<string, ToolDispatch>([
@@ -26,16 +28,22 @@ export function createMcpServer(apiClient: ApiClient): McpServer {
     let result: CallToolResult;
     try {
       const dispatch = tools.get(request.params.name);
-      result = dispatch
-        ? await dispatch(request.params.arguments ?? {})
-        : validationToolError([
-            {
-              parameter: "name",
-              reason: "Unknown tool name.",
-              allowed_values: [...tools.keys()],
-              suggestion: "Choose a tool returned by tools/list.",
-            },
-          ]);
+      if (!dispatch) {
+        result = validationToolError([
+          {
+            parameter: "name",
+            reason: "Unknown tool name.",
+            allowed_values: [...tools.keys()],
+            suggestion: "Choose a tool returned by tools/list.",
+          },
+        ]);
+      } else if (!credential.ok) {
+        // No usable caller key: answer locally so an unauthenticated invocation
+        // never reaches REST as an anonymous read.
+        result = authenticationToolError();
+      } else {
+        result = await dispatch(request.params.arguments ?? {}, credential.authorization);
+      }
     } catch {
       result = internalToolError();
     }

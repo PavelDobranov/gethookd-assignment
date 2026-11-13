@@ -1,7 +1,7 @@
 import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import type { z } from "zod/v4";
 
-export type ToolDispatch = (input: unknown) => Promise<CallToolResult>;
+export type ToolDispatch = (input: unknown, authorization: string) => Promise<CallToolResult>;
 
 type Detail = { parameter: string; reason: string; allowed_values: string[]; suggestion: string | null };
 
@@ -34,15 +34,31 @@ export function validationToolError(details: Detail[]): CallToolResult {
   );
 }
 
+/**
+ * Safe authentication guidance for a tool call that carried no usable caller
+ * credential. Mirrors REST's UNAUTHENTICATED wording and is returned locally so
+ * an absent/malformed/duplicate header never reaches REST as an anonymous call.
+ */
+export function authenticationToolError(): CallToolResult {
+  return toolError(
+    "UNAUTHENTICATED",
+    "A valid Bearer API key is required.",
+    "Provide exactly one stored API key in Authorization: Bearer <key> on the MCP request.",
+  );
+}
+
 /** One schema for discovery and local validation; only public SDK APIs are used. */
 export function registerValidatedTool<T>(
   server: McpServer,
   name: string,
   config: { title: string; description: string; inputSchema: z.ZodType<T> },
-  handler: (input: T) => Promise<CallToolResult>,
+  handler: (input: T, authorization: string) => Promise<CallToolResult>,
 ): ToolDispatch {
-  server.registerTool(name, config, handler);
-  return async (input) => {
+  // Registration supplies only the discovery schema and description; execution
+  // flows through the returned dispatch, because server.ts overrides tools/call
+  // to carry the caller's credential. This handler is therefore never invoked.
+  server.registerTool(name, config, () => internalToolError());
+  return async (input, authorization) => {
     const parsed = config.inputSchema.safeParse(input);
     if (!parsed.success) {
       return validationToolError(
@@ -59,6 +75,6 @@ export function registerValidatedTool<T>(
         }),
       );
     }
-    return handler(parsed.data);
+    return handler(parsed.data, authorization);
   };
 }

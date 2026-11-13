@@ -3,6 +3,7 @@ import { localhostHostValidation, localhostOriginValidation, toNodeHandler } fro
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import type { ApiClient } from "./api-client.js";
+import { currentCredential, extractCredential, runWithCredential } from "./credentials.js";
 import { createMcpServer } from "./server.js";
 
 export type McpApp = {
@@ -17,16 +18,21 @@ export type McpApp = {
  * served at POST /mcp; the localhost Host/Origin guards run first and answer any
  * other request with 403, which is the recommended loopback DNS-rebinding
  * protection for a local HTTP transport.
+ *
+ * Each caller's Bearer credential is read from Node's raw headers before the SDK
+ * normalizes them and bound to the request's async context. The per-request
+ * factory reads it there, so `req.auth` is never set — an unverified key is never
+ * presented to the SDK as validated authInfo.
  */
 export function createMcpApp({ apiClient }: { apiClient: ApiClient }): McpApp {
-  const handler = createMcpHandler(() => createMcpServer(apiClient));
+  const handler = createMcpHandler(() => createMcpServer(apiClient, currentCredential()));
   const nodeHandler = toNodeHandler(handler);
   const validateHost = localhostHostValidation();
   const validateOrigin = localhostOriginValidation();
 
   const server = createServer((req, res) => {
     if (!validateHost(req, res) || !validateOrigin(req, res)) return;
-    void nodeHandler(req, res);
+    runWithCredential(extractCredential(req.rawHeaders), () => void nodeHandler(req, res));
   });
 
   return {

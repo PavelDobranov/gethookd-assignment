@@ -104,8 +104,8 @@ export function registerSearchAds(server: McpServer, apiClient: ApiClient): Tool
             "sort=impressions requires brand_id for a new search. A continuation may inherit it from its cursor; REST validates the effective brand.",
         }),
     },
-    async (input) => {
-      const { isError, body } = await apiClient.searchAds(input);
+    async (input, authorization) => {
+      const { isError, body } = await apiClient.searchAds(input, authorization);
       return { isError, content: [{ type: "text", text: JSON.stringify(body) }] };
     },
   );
