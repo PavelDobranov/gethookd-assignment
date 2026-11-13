@@ -8,7 +8,10 @@ export interface FieldErrorProps {
 // Inline validation message. Renders nothing when there is no error, so callers
 // can mount it unconditionally and wire it with aria-describedby.
 export function FieldError({ id, children }: FieldErrorProps) {
-  if (!children) return null;
+  if (!children) {
+    return null;
+  }
+
   return (
     <span id={id} role="alert" className="field-error">
       {children}

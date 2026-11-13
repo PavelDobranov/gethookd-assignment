@@ -20,8 +20,6 @@ export interface KeyRowProps {
   onRevoke: (key: KeyMetadata) => void;
 }
 
-// One key row: masked prefix, scope chips, dates, a status badge and — for an
-// active key — a Revoke action. No "Name" column (the API has no name field).
 export function KeyRow({ apiKey, mutating = false, onRevoke }: KeyRowProps) {
   const revoked = apiKey.revoked_at !== null;
   return (
@@ -83,8 +81,6 @@ export interface KeyTableProps {
   onRevoke: (key: KeyMetadata) => void;
 }
 
-// The keys table shell. Horizontal scroll is handled by the wrapper so narrow
-// content regions never clip the row actions.
 export function KeyTable({ keys, mutating = false, onRevoke }: KeyTableProps) {
   return (
     <div className="table-scroll">

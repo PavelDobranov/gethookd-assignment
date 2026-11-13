@@ -11,16 +11,20 @@ export const AppActionsContext = createContext<AppActions | null>(null);
 
 export function useAppState(): AppState {
   const state = useContext(AppStateContext);
+
   if (state === null) {
     throw new Error("useAppState must be used within a PortalProvider.");
   }
+
   return state;
 }
 
 export function useAppActions(): AppActions {
   const actions = useContext(AppActionsContext);
+
   if (actions === null) {
     throw new Error("useAppActions must be used within a PortalProvider.");
   }
+
   return actions;
 }

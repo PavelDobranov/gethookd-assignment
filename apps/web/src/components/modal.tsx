@@ -20,9 +20,6 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
-// Accessible dialog: overlays the app, traps Tab within the dialog, closes on
-// Escape, and restores focus to the previously focused element on unmount.
-// Focus management is a presentational concern, so it lives here, not in state.
 export function Modal({
   titleId,
   describedById,
@@ -38,6 +35,7 @@ export function Modal({
     const dialog = dialogRef.current;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const focusables = () => Array.from(dialog?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+
     (focusables()[0] ?? dialog)?.focus();
 
     function onKeyDown(event: KeyboardEvent) {
@@ -46,16 +44,21 @@ export function Modal({
         onClose();
         return;
       }
+
       if (event.key !== "Tab") return;
+
       const items = focusables();
+
       if (items.length === 0) {
         event.preventDefault();
         dialog?.focus();
         return;
       }
+
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;
+
       if (event.shiftKey && (active === first || active === dialog)) {
         event.preventDefault();
         last.focus();
@@ -66,6 +69,7 @@ export function Modal({
     }
 
     document.addEventListener("keydown", onKeyDown, true);
+
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
       previouslyFocused?.focus?.();

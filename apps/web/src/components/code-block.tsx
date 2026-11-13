@@ -8,8 +8,6 @@ export interface CodeBlockProps {
   children?: ReactNode;
 }
 
-// Read-only code sample with a copy button. Holds only the ephemeral "copied"
-// flash locally; everything else is presentational.
 export function CodeBlock({ code, title, children }: CodeBlockProps) {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [copied, setCopied] = useState(false);

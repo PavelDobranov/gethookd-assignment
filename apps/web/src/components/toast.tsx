@@ -28,6 +28,7 @@ function ToneIcon({ tone }: { tone: ToastTone }) {
       </svg>
     );
   }
+
   return (
     <svg
       width="18"

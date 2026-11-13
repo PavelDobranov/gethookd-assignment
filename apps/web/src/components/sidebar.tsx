@@ -7,8 +7,6 @@ export interface NavItemProps {
   onSelect: () => void;
 }
 
-// A single navigation control. A real <button> so keyboard users reach it;
-// the active item is marked aria-current="page".
 export function NavItem({ label, icon, active = false, onSelect }: NavItemProps) {
   return (
     <button type="button" className="nav-item" aria-current={active ? "page" : undefined} onClick={onSelect}>
@@ -36,8 +34,6 @@ export interface SidebarProps {
   onSignOut: () => void;
 }
 
-// Portal navigation rail: brand, the view switcher, and the signed-in user with
-// a log-out control. Stateless — the current view and callbacks come in as props.
 export function Sidebar({ items, current, onSelect, username, onSignOut }: SidebarProps) {
   const initial = username.trim().charAt(0).toUpperCase() || "?";
   return (

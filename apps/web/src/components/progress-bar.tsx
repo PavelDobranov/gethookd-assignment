@@ -4,11 +4,11 @@ export interface ProgressBarProps {
   label?: string;
 }
 
-// Quota meter. Colour escalates with usage: accent < 80% < warning < 100% danger.
 export function ProgressBar({ value, max, label = "Progress" }: ProgressBarProps) {
   const safeMax = max > 0 ? max : 1;
   const ratio = Math.min(Math.max(value / safeMax, 0), 1);
   const level = ratio >= 1 ? "danger" : ratio >= 0.8 ? "warning" : "normal";
+
   return (
     <div
       className="progress"

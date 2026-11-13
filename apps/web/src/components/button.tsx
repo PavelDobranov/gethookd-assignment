@@ -18,8 +18,6 @@ const sizeClass: Record<ButtonSize, string | null> = {
   icon: "btn-icon",
 };
 
-// Stateless button primitive. All behaviour (onClick, disabled) arrives via
-// props; `busy` dims the control and marks it aria-busy without disabling it.
 export function Button({
   variant = "primary",
   size = "md",
@@ -31,6 +29,7 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const classes = ["btn", `btn-${variant}`, sizeClass[size], className].filter(Boolean).join(" ");
+
   return (
     <button
       type={type}

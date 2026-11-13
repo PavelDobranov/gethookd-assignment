@@ -12,12 +12,13 @@ export interface BadgeProps {
   children: ReactNode;
 }
 
-// Status pill or monospace chip. Purely presentational.
 export function Badge({ tone = "neutral", mono = false, dot = false, className, children }: BadgeProps) {
   if (mono) {
     return <span className={["badge-mono", className].filter(Boolean).join(" ")}>{children}</span>;
   }
+
   const toneClass = tone === "neutral" ? null : `badge-${tone}`;
+
   return (
     <span className={["badge", toneClass, className].filter(Boolean).join(" ")}>
       {dot && <span className="badge-dot" aria-hidden="true" />}

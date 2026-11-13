@@ -1,9 +1,6 @@
 import type { Action, AppState } from "./types";
 import { clearedSlices } from "./types";
 
-// Pure, synchronous state machine. No I/O, no timers, no refs — every async
-// concern lives in the provider, which dispatches these transitions.
-
 // Drop modal, draft and the reveal-once secret. Shared by closeModal, view
 // changes and sign-out, where lingering form or secret state would be unsafe.
 function resetEphemeral(state: AppState): AppState {

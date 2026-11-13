@@ -3,10 +3,6 @@ import type { KeyList, KeyMetadata, KeyScope, KeySummary, OwnerUsage } from "../
 
 export type { KeySummary };
 
-// One app-state object drives the whole portal. The provider owns all backend
-// I/O and is the only code that dispatches these actions; views and leaves read
-// the resulting state and send intents. Transitions here are pure and sync.
-
 export type SessionStatus = "checking" | "authenticated" | "anonymous" | "unavailable";
 export type View = "overview" | "keys" | "usage";
 export type ModalKind = "none" | "create" | "revoke";
@@ -97,9 +93,6 @@ export type Action =
   | { type: "create/error"; error: string }
   | { type: "create/dismissSecret" };
 
-// Intents exposed to views. The provider implements these; the object is
-// referentially stable so action-only consumers never re-render on data change.
-// Starred methods perform network I/O (auth.ts / portal-api.ts).
 export interface AppActions {
   restoreSession(): Promise<void>;
   signIn(credentials: Credentials): Promise<void>;
@@ -121,8 +114,6 @@ export interface AppActions {
 
 export const DEFAULT_PAGINATION: Pagination = { limit: 20, offset: 0 };
 
-// The non-session slices in their pristine form. A fresh session (restore
-// start, sign-in, sign-out) resets these so stale data never leaks across.
 export const clearedSlices: Omit<AppState, "session"> = {
   ui: {
     view: "overview",
