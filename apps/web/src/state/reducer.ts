@@ -19,7 +19,8 @@ export function appReducer(state: AppState, action: Action): AppState {
     case "session/checking":
       return { session: { status: "checking", user: null, token: "", error: "" }, ...clearedSlices };
     case "session/anonymous":
-      return { session: { status: "anonymous", user: null, token: "", error: "" }, ...clearedSlices };
+      // An optional error carries a failed sign-in message back to the login view.
+      return { session: { status: "anonymous", user: null, token: "", error: action.error ?? "" }, ...clearedSlices };
     case "session/authenticated":
       return {
         session: { status: "authenticated", user: action.user, token: action.token, error: "" },

@@ -1,5 +1,7 @@
 import type { Credentials, User } from "../auth";
-import type { KeyList, KeyMetadata, KeyScope, OwnerUsage } from "../portal-api";
+import type { KeyList, KeyMetadata, KeyScope, KeySummary, OwnerUsage } from "../portal-api";
+
+export type { KeySummary };
 
 // One app-state object drives the whole portal. The provider owns all backend
 // I/O and is the only code that dispatches these actions; views and leaves read
@@ -47,14 +49,8 @@ export interface KeysState {
   error: string;
 }
 
-// Client-derived counts, aggregated from every page of listKeys.
-export interface KeySummary {
-  active: number;
-  revoked: number;
-  lastUsedAt: string | null;
-  lastPrefix: string | null;
-}
-
+// KeySummary (client-derived counts, aggregated from every page of listKeys)
+// is defined alongside the fetch helper in portal-api and re-exported above.
 export interface SummaryState extends KeySummary {
   status: AsyncStatus;
 }
@@ -77,7 +73,7 @@ export interface AppState {
 export type Action =
   | { type: "session/checking" }
   | { type: "session/authenticated"; user: User; token: string }
-  | { type: "session/anonymous" }
+  | { type: "session/anonymous"; error?: string }
   | { type: "session/unavailable"; error: string }
   | { type: "ui/setView"; view: View }
   | { type: "ui/openCreate" }

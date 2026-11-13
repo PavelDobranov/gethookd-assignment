@@ -241,3 +241,36 @@ export async function revokeKey(token: string, id: string): Promise<void> {
 export async function getUsage(token: string) {
   return request(token, "/usage", "GET", 200, parseUsage);
 }
+
+// Client-derived key counts for the Overview summary card. The API exposes no
+// aggregate, so page through every key (largest page size, following has_more)
+// and fold the results. "last activity" is the most recently used key.
+export interface KeySummary {
+  active: number;
+  revoked: number;
+  lastUsedAt: string | null;
+  lastPrefix: string | null;
+}
+
+export async function summarizeKeys(token: string): Promise<KeySummary> {
+  let offset = 0;
+  let active = 0;
+  let revoked = 0;
+  let lastUsedAt: string | null = null;
+  let lastPrefix: string | null = null;
+  for (;;) {
+    const page = await listKeys(token, { limit: 100, offset });
+    for (const key of page.data) {
+      if (key.revoked_at === null) active += 1;
+      else revoked += 1;
+      // Timestamps are canonical ISO strings, so lexical order is chronological.
+      if (key.last_used_at !== null && (lastUsedAt === null || key.last_used_at > lastUsedAt)) {
+        lastUsedAt = key.last_used_at;
+        lastPrefix = key.prefix;
+      }
+    }
+    if (!page.has_more || page.data.length === 0) break;
+    offset += page.limit;
+  }
+  return { active, revoked, lastUsedAt, lastPrefix };
+}

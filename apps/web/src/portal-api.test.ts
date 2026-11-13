@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { createKey, getUsage, listKeys, revokeKey } from "./portal-api";
+import { createKey, getUsage, type KeyMetadata, listKeys, revokeKey, summarizeKeys } from "./portal-api";
 
 const token = "header.payload.signature";
 const id = "06a9d160-b0b4-4e51-9809-f244d57e361e";
@@ -218,4 +218,65 @@ it("sanitizes network/redirect rejection and unreadable/wrong-status responses w
   });
   fetcher.mockResolvedValueOnce(Response.json({}, { status: 200 }));
   await expect(revokeKey(token, id)).rejects.toMatchObject({ kind: "invalid_response" });
+});
+
+const uuids = [
+  "11111111-1111-1111-1111-111111111111",
+  "22222222-2222-2222-2222-222222222222",
+  "33333333-3333-3333-3333-333333333333",
+  "44444444-4444-4444-4444-444444444444",
+  "55555555-5555-5555-5555-555555555555",
+];
+function keyAt(i: number, over: Partial<KeyMetadata> = {}): KeyMetadata {
+  return {
+    ...key,
+    scopes: [...key.scopes] as KeyMetadata["scopes"],
+    id: uuids[i],
+    prefix: `ghk_live_000${i}`,
+    ...over,
+  };
+}
+it("summarizeKeys pages every key (limit 100, following has_more) and aggregates counts", async () => {
+  const pageOne = {
+    data: [
+      keyAt(0, { last_used_at: "2026-11-01T00:00:00.000Z", revoked_at: null }),
+      keyAt(1, { last_used_at: null, revoked_at: "2026-11-02T00:00:00.000Z" }),
+      keyAt(2, { last_used_at: null, revoked_at: null }),
+    ],
+    limit: 100,
+    offset: 0,
+    has_more: true,
+  };
+  const pageTwo = {
+    data: [
+      keyAt(3, { prefix: "ghk_live_last", last_used_at: "2026-11-05T00:00:00.000Z", revoked_at: null }),
+      keyAt(4, { last_used_at: "2026-10-01T00:00:00.000Z", revoked_at: "2026-11-03T00:00:00.000Z" }),
+    ],
+    limit: 100,
+    offset: 100,
+    has_more: false,
+  };
+  const fetcher = vi.fn();
+  fetcher.mockResolvedValueOnce(Response.json(pageOne)).mockResolvedValueOnce(Response.json(pageTwo));
+  vi.stubGlobal("fetch", fetcher);
+  expect(await summarizeKeys(token)).toEqual({
+    active: 3,
+    revoked: 2,
+    lastUsedAt: "2026-11-05T00:00:00.000Z",
+    lastPrefix: "ghk_live_last",
+  });
+  expect(fetcher).toHaveBeenNthCalledWith(1, "/api/portal/keys?limit=100&offset=0", expect.anything());
+  expect(fetcher).toHaveBeenNthCalledWith(2, "/api/portal/keys?limit=100&offset=100", expect.anything());
+});
+it("summarizeKeys reports no activity when no key has ever been used", async () => {
+  respond({
+    data: [
+      keyAt(0, { last_used_at: null, revoked_at: null }),
+      keyAt(1, { last_used_at: null, revoked_at: "2026-11-02T00:00:00.000Z" }),
+    ],
+    limit: 100,
+    offset: 0,
+    has_more: false,
+  });
+  expect(await summarizeKeys(token)).toEqual({ active: 1, revoked: 1, lastUsedAt: null, lastPrefix: null });
 });
