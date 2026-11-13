@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, expect, inject, it, vi } from "vitest";
+import { sql } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
 import { parse } from "yaml";
 
 import { niches } from "../src/ads/model.js";
@@ -13,6 +13,7 @@ import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 type Schema = Record<string, unknown>;
 type Parameter = {
@@ -69,7 +70,8 @@ const paths = ["/api/v1/ads", "/api/v1/ads/{id}", "/api/v1/niches"];
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v1_openapi_test";
 const connection = createDatabase(url.href);
-const key = "public-v1-openapi-test-key";
+let key: string;
+let caseNumber = 0;
 const brandId = 94001;
 let server: Server;
 let origin: string;
@@ -83,8 +85,6 @@ beforeAll(async () => {
   }
   await initializeDatabase(url.href);
   await connection.db.delete(ads);
-  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
-  await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
   await connection.db.insert(brands).values([
     { id: brandId, name: "Contract Brand" },
     { id: brandId + 1, name: "Other Brand" },
@@ -114,6 +114,19 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   origin = `http://127.0.0.1:${address.port}`;
+});
+
+// Fresh identities isolate allowance/quota state; each contract case keeps its key.
+beforeEach(async () => {
+  key = `public-v1-openapi-test-key-${++caseNumber}`;
+  const [owner] = await connection.db
+    .insert(users)
+    .values({
+      username: key,
+      passwordHash: "unused-rest-fixture-hash",
+    })
+    .returning({ id: users.id });
+  await connection.db.insert(apiKeys).values(apiKeyFixture(owner.id, hashApiKey(key), key.slice(0, 12)));
 });
 
 afterAll(async () => {

@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
 import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, expect, inject, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
 
 import { niches } from "../src/ads/model.js";
 import { hashApiKey } from "../src/api-keys/index.js";
@@ -9,11 +9,14 @@ import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v0_test";
 const connection = createDatabase(url.href);
-const key = "public-v0-test-key";
+const publicKey = "public-v0-test-key";
+let key: string;
+let caseNumber = 0;
 let server: Server;
 let origin: string;
 
@@ -28,8 +31,6 @@ beforeAll(async () => {
   await connection.db.delete(ads);
   await connection.db.delete(brands);
   await connection.db.insert(brands).values({ id: 1, name: "Contract Brand" });
-  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
-  await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
   await connection.db.insert(ads).values({
     id: "contract-ad",
     brandId: 1,
@@ -110,6 +111,19 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   origin = `http://127.0.0.1:${address.port}`;
+});
+
+// Fresh identities isolate allowance/quota state; multi-call cases retain one key.
+beforeEach(async () => {
+  key = `${publicKey}-${++caseNumber}`;
+  const [owner] = await connection.db
+    .insert(users)
+    .values({
+      username: key,
+      passwordHash: "unused-rest-fixture-hash",
+    })
+    .returning({ id: users.id });
+  await connection.db.insert(apiKeys).values(apiKeyFixture(owner.id, hashApiKey(key), key.slice(0, 12)));
 });
 
 afterAll(async () => {
@@ -274,11 +288,12 @@ it.each([
   "api_key[]=wrong",
   "api_key[x]=wrong",
   "API_KEY=wrong",
-  `api_key=+${key}+`,
-  `api_key=${key.toUpperCase()}`,
+  `api_key=+${publicKey}+`,
+  `api_key=${publicKey.toUpperCase()}`,
   "api_key=%27+OR+1%3D1+--",
 ])("rejects missing or unmatched scalar keys: %s", async (query) => {
-  await expectInvalid(query);
+  // Apply malformed variants to this case's real credential, not an unknown key.
+  await expectInvalid(query.replaceAll(publicKey.toUpperCase(), key.toUpperCase()).replaceAll(publicKey, key));
 });
 
 for (const name of ["page", "per_page"]) {
@@ -404,7 +419,7 @@ it("validates stored-key state on every request rather than caching credentials"
   const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
   const keyHash = hashApiKey(transientKey);
   try {
-    await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash });
+    await connection.db.insert(apiKeys).values(apiKeyFixture(demo.id, keyHash, transientKey.slice(0, 12)));
     const response = await fetch(`${origin}/api/v0/ads?${query}`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ data: [], page: 1, total: 0 });

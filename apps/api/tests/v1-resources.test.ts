@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { request as httpRequest, type Server } from "node:http";
 import { eq, sql } from "drizzle-orm";
 import { SignJWT } from "jose";
-import { afterAll, beforeAll, expect, inject, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, inject, it, vi } from "vitest";
 
 import { niches } from "../src/ads/model.js";
 import { hashApiKey } from "../src/api-keys/index.js";
@@ -10,11 +10,14 @@ import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v1_resources_test";
 const connection = createDatabase(url.href);
-const key = "public-v1-resource-test-key";
+const publicKey = "public-v1-resource-test-key";
+let key: string;
+let caseNumber = 0;
 const jwtSecret = "public-v1-resource-jwt-secret-32-bytes";
 let server: Server;
 let origin: string;
@@ -27,13 +30,24 @@ beforeAll(async () => {
     await admin.close();
   }
   await initializeDatabase(url.href);
-  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
-  await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
   server = createApp({ db: connection.db, jwtSecret }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Expected TCP listener");
   origin = `http://127.0.0.1:${address.port}`;
+});
+
+// Fresh identities isolate allowance/quota state; auth-mutation cases retain one key.
+beforeEach(async () => {
+  key = `${publicKey}-${++caseNumber}`;
+  const [owner] = await connection.db
+    .insert(users)
+    .values({
+      username: key,
+      passwordHash: "unused-rest-fixture-hash",
+    })
+    .returning({ id: users.id });
+  await connection.db.insert(apiKeys).values(apiKeyFixture(owner.id, hashApiKey(key), key.slice(0, 12)));
 });
 
 afterAll(async () => {
@@ -237,10 +251,11 @@ it.each([
   "Bearer",
   "Bearer ",
   "Bearer invalid",
-  `Bearer ${key} extra`,
-  `Bearer ${key},${key}`,
+  `Bearer ${publicKey} extra`,
+  `Bearer ${publicKey},${publicKey}`,
 ])("rejects missing, malformed or invalid credentials: %s", async (authorization) => {
-  const error = await expectError(await request("/niches", authorization), 401, "UNAUTHENTICATED");
+  const currentAuthorization = authorization === null ? null : authorization.replaceAll(publicKey, key);
+  const error = await expectError(await request("/niches", currentAuthorization), 401, "UNAUTHENTICATED");
   expect(error.details).toEqual([]);
   expect(error.next_action).toContain("Bearer");
 });

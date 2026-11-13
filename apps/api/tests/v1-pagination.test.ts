@@ -9,12 +9,14 @@ import { createDatabase } from "../src/db/client.js";
 import { initializeDatabase } from "../src/db/initialize.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
 import { runIngestTick } from "../src/ingest/tick.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 const url = new URL(inject("postgresUrl"));
 url.pathname = "/gethookd_v1_pagination_test";
 const connection = createDatabase(url.href);
 const writer = createDatabase(url.href);
-const key = "public-v1-pagination-test-key";
+let key: string;
+let caseNumber = 0;
 const brandId = 92001;
 let server: Server;
 let origin: string;
@@ -44,8 +46,6 @@ beforeAll(async () => {
     await admin.close();
   }
   await initializeDatabase(url.href);
-  const [demo] = await connection.db.select().from(users).where(eq(users.username, "demo"));
-  await connection.db.insert(apiKeys).values({ userId: demo.id, keyHash: hashApiKey(key) });
   await connection.db.insert(brands).values({ id: brandId, name: "Pagination Brand" });
   await listen(connection.db);
 });
@@ -65,6 +65,16 @@ afterAll(async () => {
   await writer.close();
 });
 beforeEach(async () => {
+  // Keep one fresh identity for the complete walk, including app/pool restarts.
+  key = `public-v1-pagination-test-key-${++caseNumber}`;
+  const [owner] = await connection.db
+    .insert(users)
+    .values({
+      username: key,
+      passwordHash: "unused-rest-fixture-hash",
+    })
+    .returning({ id: users.id });
+  await connection.db.insert(apiKeys).values(apiKeyFixture(owner.id, hashApiKey(key), key.slice(0, 12)));
   await connection.db.delete(ads);
   await connection.db.insert(ads).values([ad("A", 1), ad("Z", 4), ad("a"), ad("z")]);
 });
