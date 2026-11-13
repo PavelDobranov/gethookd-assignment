@@ -46,9 +46,10 @@ The repository is an npm-workspaces monorepo with two applications — a backend
   usage/billing records. The API reaches it through Drizzle; schema changes are
   committed SQL migrations under `apps/api/drizzle/`.
 
-- **MCP server — _planned (M5)._** A future Model Context Protocol server that will
-  expose the API's search as REST-backed MCP tools. It does not exist yet; when
-  built it will call the API over HTTP, just like the Web app.
+- **MCP server — `apps/mcp` (M5 in progress).** Independent Streamable HTTP server
+  on loopback port `3001`, calling the API over HTTP only. `list_niches` is
+  HTTP-backed; search/detail and caller credential forwarding remain unfinished.
+  The protected API still requires a valid key. See [MCP setup and limits](apps/mcp/README.md).
 
 ### How the parts communicate
 

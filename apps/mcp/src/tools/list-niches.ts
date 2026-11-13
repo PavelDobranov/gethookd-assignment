@@ -1,13 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 
-import { notImplemented } from "./not-implemented.js";
+import type { ApiClient } from "../api-client.js";
 
 const description = [
   "List the advertising niches available in GetHookd, returning each niche's slug and display name.",
   "Use the returned slugs as the niche filter in search_ads.",
 ].join(" ");
 
-export function registerListNiches(server: McpServer): void {
+export function registerListNiches(server: McpServer, apiClient: ApiClient): void {
   // No inputs: the tool takes no arguments, so no input schema is registered.
   server.registerTool(
     "list_niches",
@@ -15,6 +15,9 @@ export function registerListNiches(server: McpServer): void {
       title: "List niches",
       description,
     },
-    async () => notImplemented("list_niches"),
+    async () => {
+      const { isError, body } = await apiClient.listNiches();
+      return { isError, content: [{ type: "text", text: JSON.stringify(body) }] };
+    },
   );
 }

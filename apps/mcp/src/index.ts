@@ -4,7 +4,7 @@ import { createMcpApp } from "./transport.js";
 
 const config = loadMcpConfig();
 const apiClient = createApiClient({ baseUrl: config.apiBaseUrl });
-const app = createMcpApp();
+const app = createMcpApp({ apiClient });
 
 app.server.on("error", (error) => {
   console.error("MCP server failed to start:", error);
@@ -13,7 +13,7 @@ app.server.on("error", (error) => {
 
 app.server.listen(config.port, config.host, () => {
   console.log(`MCP server listening on http://${config.host}:${config.port}/mcp`);
-  console.log(`REST API base URL (not called yet): ${apiClient.baseUrl}`);
+  console.log(`REST API origin: ${apiClient.baseUrl}`);
 });
 
 async function shutdown() {

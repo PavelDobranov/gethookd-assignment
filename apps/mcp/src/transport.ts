@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
+import type { ApiClient } from "./api-client.js";
 import { createMcpServer } from "./server.js";
 
 export type McpApp = {
@@ -17,8 +18,8 @@ export type McpApp = {
  * other request with 403, which is the recommended loopback DNS-rebinding
  * protection for a local HTTP transport.
  */
-export function createMcpApp(): McpApp {
-  const handler = createMcpHandler(() => createMcpServer());
+export function createMcpApp({ apiClient }: { apiClient: ApiClient }): McpApp {
+  const handler = createMcpHandler(() => createMcpServer(apiClient));
   const nodeHandler = toNodeHandler(handler);
   const validateHost = localhostHostValidation();
   const validateOrigin = localhostOriginValidation();
