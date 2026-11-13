@@ -4,7 +4,10 @@
 
 Accepted; implemented in M4 (`keys-and-usage`, #97), following the approved
 [M2 specification (#34)](https://github.com/PavelDobranov/gethookd-assignment/issues/34)
-and M4 specification #76.
+and M4 specification #76. The shared per-key allowance this exception consumes is
+defined in [ADR-0005](0005-exact-usage-and-shared-controls.md); local and
+built-stack workflow verification is recorded in
+[#109](https://github.com/PavelDobranov/gethookd-assignment/issues/109).
 
 ## Date
 

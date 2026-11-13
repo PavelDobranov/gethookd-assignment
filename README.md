@@ -627,9 +627,11 @@ fields are accepted. Creation accepts JSON up to 16 KB. Unknown query parameters
 are rejected; list limit/offset accept decimal digits only (limit 1–100, offset
 a nonnegative safe integer). Invalid UUIDs yield 422; foreign/missing IDs share
 404 `KEY_NOT_FOUND`. Authentication is checked against a live user before parsing.
-There is no automatic POST retry or secret recovery: after a lost response, list
-and revoke the orphan, then explicitly create a replacement. The browser
-management UI remains a later slice.
+Any `Idempotency-Key` header on these JWT routes is ignored, including invalid
+values, and never makes POST creation retry-safe. There is no automatic POST retry
+or secret recovery: a dropped creation response loses the reveal-once secret for
+good, so list and revoke the orphan, then explicitly create a replacement. The
+browser management UI remains a later slice.
 
 ### Scoped API management and owner usage
 
@@ -1412,11 +1414,16 @@ by deterministic suites. Cursor rationale and operational limits are in
 1. **M3 final acceptance (#73):** human review of the implemented v1 contracts,
    OpenAPI and isolated workflow results. `DESIGN.md` and `AI_NOTES.md` remain
    user-owned and were not created or modified. Preserve v0's intentional quirks.
-2. **M4 — keys and usage:** managed key lifecycle/scopes/revocation, shared
-   60-request/minute limits, exact/idempotent billing and the functional portal.
-   Implement/test the [v0 429 exception](docs/adr/0001-v0-rate-limit-exception.md)
-   here, not in M3; quota enforcement remains a SHOULD requirement. No current v1
-   429 response or production-ready authentication is claimed.
+2. **M4 final acceptance (#77):** human review of the implemented and verified
+   keys-and-usage slice — managed key lifecycle/scopes/revocation, the shared
+   60-request/minute allowance, exact/idempotent billing, the authoritative owner
+   meter and the functional portal. The
+   [v0 429 exception](docs/adr/0001-v0-rate-limit-exception.md) is implemented here,
+   not in M3; the accepted accounting and admission design is recorded in
+   [ADR-0005](docs/adr/0005-exact-usage-and-shared-controls.md). Local and
+   built-stack workflows were exercised against isolated environments (#109).
+   Quota enforcement remains a SHOULD requirement; there is no v1 429 response,
+   production-ready authentication or production-scale benchmark.
 3. **M5 — MCP and evaluation:** REST-backed tools consuming shared controls,
    compact outputs and real-model/client evaluation with the required transcripts.
    Cross-brand impression comparisons remain unsupported by brand-local ranks.
