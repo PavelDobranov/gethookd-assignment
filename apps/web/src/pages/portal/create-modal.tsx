@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 
-import { Button } from "./components/button";
-import { FieldError } from "./components/field-error";
-import { Modal } from "./components/modal";
+import { Button } from "../../components/button";
+import { FieldError } from "../../components/field-error";
+import { Modal } from "../../components/modal";
+import { useAppActions, useAppState } from "../../state/context";
 import { SecretReveal } from "./components/secret-reveal";
-import { useAppActions, useAppState } from "./state/context";
 
 const scopes = ["search:read", "keys:manage"] as const;
 

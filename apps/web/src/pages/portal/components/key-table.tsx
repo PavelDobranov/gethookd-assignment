@@ -1,6 +1,6 @@
-import type { KeyMetadata } from "../portal-api";
-import { Badge } from "./badge";
-import { Button } from "./button";
+import { Badge } from "../../../components/badge";
+import { Button } from "../../../components/button";
+import type { KeyMetadata } from "../../../portal-api";
 
 // Fixed UTC formatting keeps the rendered dates deterministic across machines.
 const dateFormat = new Intl.DateTimeFormat("en-US", {

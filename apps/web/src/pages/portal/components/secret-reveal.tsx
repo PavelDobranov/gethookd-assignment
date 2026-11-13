@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 
-import { Button } from "./button";
+import { Button } from "../../../components/button";
 
 export interface SecretRevealProps {
   secret: string;

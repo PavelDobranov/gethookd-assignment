@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
 
-import { Button } from "./components/button";
-import { EmptyState } from "./components/empty-state";
+import { Button } from "../../components/button";
+import { EmptyState } from "../../components/empty-state";
+import { useAppActions, useAppState } from "../../state/context";
 import { KeyTable } from "./components/key-table";
-import { useAppActions, useAppState } from "./state/context";
 
 export function KeysView() {
   const { keys } = useAppState();

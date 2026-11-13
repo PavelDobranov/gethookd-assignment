@@ -1,6 +1,6 @@
 import { Button } from "./components/button";
-import { LoginScreen } from "./login";
-import { PortalShell } from "./shell";
+import { LoginScreen } from "./pages/login/login";
+import { PortalShell } from "./pages/portal/shell";
 import { useAppActions, useAppState } from "./state/context";
 import { PortalProvider } from "./state/portal-provider";
 import "./styles.css";

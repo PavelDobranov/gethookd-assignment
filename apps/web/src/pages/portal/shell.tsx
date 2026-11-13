@@ -1,10 +1,10 @@
+import { Toast } from "../../components/toast";
+import { useAppActions, useAppState } from "../../state/context";
 import { Sidebar } from "./components/sidebar";
-import { Toast } from "./components/toast";
 import { CreateKeyModal } from "./create-modal";
 import { KeysView } from "./keys-view";
 import { OverviewView } from "./overview";
 import { RevokeKeyModal } from "./revoke-modal";
-import { useAppActions, useAppState } from "./state/context";
 import { UsageView } from "./usage";
 
 const items = [

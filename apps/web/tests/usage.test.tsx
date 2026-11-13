@@ -4,10 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import App from "../src/app";
 import * as auth from "../src/auth";
+import { UsageView } from "../src/pages/portal/usage";
 import { getUsage, listKeys, type OwnerUsage, PortalError, summarizeKeys } from "../src/portal-api";
 import { useAppActions, useAppState } from "../src/state/context";
 import { PortalProvider } from "../src/state/portal-provider";
-import { UsageView } from "../src/usage";
 
 vi.mock("../src/auth", async (original) => ({
   ...(await original<typeof import("../src/auth")>()),

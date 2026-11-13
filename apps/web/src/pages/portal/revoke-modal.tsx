@@ -1,7 +1,7 @@
-import { Badge } from "./components/badge";
-import { Button } from "./components/button";
-import { Modal } from "./components/modal";
-import { useAppActions, useAppState } from "./state/context";
+import { Badge } from "../../components/badge";
+import { Button } from "../../components/button";
+import { Modal } from "../../components/modal";
+import { useAppActions, useAppState } from "../../state/context";
 
 export function RevokeKeyModal() {
   const { ui, keys } = useAppState();

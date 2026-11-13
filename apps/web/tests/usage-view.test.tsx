@@ -2,10 +2,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 
+import { UsageView } from "../src/pages/portal/usage";
 import { AppActionsContext, AppStateContext } from "../src/state/context";
 import type { AppActions, AppState } from "../src/state/types";
 import { initialState } from "../src/state/types";
-import { UsageView } from "../src/usage";
 
 afterEach(cleanup);
 

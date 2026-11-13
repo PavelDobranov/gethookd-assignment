@@ -1,8 +1,8 @@
-import { Button } from "./components/button";
-import { Card } from "./components/card";
-import { ProgressBar } from "./components/progress-bar";
-import { Stat, StatGrid } from "./components/stat-grid";
-import { useAppActions, useAppState } from "./state/context";
+import { Button } from "../../components/button";
+import { Card } from "../../components/card";
+import { ProgressBar } from "../../components/progress-bar";
+import { Stat, StatGrid } from "../../components/stat-grid";
+import { useAppActions, useAppState } from "../../state/context";
 
 export function UsageView() {
   const { usage } = useAppState();

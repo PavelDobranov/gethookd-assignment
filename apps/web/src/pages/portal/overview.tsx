@@ -1,8 +1,8 @@
-import { Button } from "./components/button";
-import { Card } from "./components/card";
+import { Button } from "../../components/button";
+import { Card } from "../../components/card";
+import { ProgressBar } from "../../components/progress-bar";
+import { useAppActions, useAppState } from "../../state/context";
 import { CodeBlock } from "./components/code-block";
-import { ProgressBar } from "./components/progress-bar";
-import { useAppActions, useAppState } from "./state/context";
 
 function relativeTime(iso: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));

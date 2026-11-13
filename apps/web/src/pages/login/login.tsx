@@ -1,8 +1,8 @@
 import type { FormEvent } from "react";
 
-import { Button } from "./components/button";
-import { Card } from "./components/card";
-import { useAppActions, useAppState } from "./state/context";
+import { Button } from "../../components/button";
+import { Card } from "../../components/card";
+import { useAppActions, useAppState } from "../../state/context";
 
 export function LoginScreen() {
   const { session } = useAppState();
