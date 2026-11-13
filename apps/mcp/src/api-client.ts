@@ -84,15 +84,15 @@ export type ApiClient = {
   searchAds(input: SearchAdsInput): Promise<ApiResult<z.infer<typeof searchResponseSchema>>>;
 };
 
-function operationalError(code: string, message: string): ApiResult<never> {
+function operationalError(message: string): ApiResult<never> {
   return {
     isError: true,
     body: {
       error: {
-        code,
+        code: "INTERNAL_ERROR",
         message,
         next_action:
-          "Check the API connection and configuration. Delivery outcome is unknown; no automatic retry was made.",
+          "Check the API connection and configuration. Delivery outcome is unknown; no automatic retry was made. For a deliberate search_ads/get_ad retry, reuse the same supplied idempotency_key; without one, another successful call can charge again.",
         retryable: false,
         details: [],
       },
@@ -153,15 +153,15 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
       });
     } catch {
       return signal.aborted
-        ? operationalError("API_TIMEOUT", "The API request exceeded its deadline.")
-        : operationalError("API_UNAVAILABLE", "The API request could not be completed.");
+        ? operationalError("The API request exceeded its deadline.")
+        : operationalError("The API request could not be completed.");
     }
 
     let body: unknown;
     try {
       body = JSON.parse(response.text);
     } catch {
-      return operationalError("API_INVALID_RESPONSE", "The API returned invalid JSON.");
+      return operationalError("The API returned invalid JSON.");
     }
     // Validate without projecting parsed output: preserve all valid JSON fields.
     const ok = response.status >= 200 && response.status < 300;
@@ -171,7 +171,7 @@ export function createApiClient({ baseUrl, timeoutMs = 10_000 }: { baseUrl: stri
     if (!ok && errorSchema.safeParse(body).success) {
       return { isError: true, body: body as z.infer<typeof errorSchema> };
     }
-    return operationalError("API_INVALID_RESPONSE", "The API returned an invalid response shape.");
+    return operationalError("The API returned an invalid response shape.");
   }
 
   return {

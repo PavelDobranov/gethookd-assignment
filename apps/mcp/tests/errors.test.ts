@@ -1,5 +1,6 @@
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createApiClient } from "../src/api-client.js";
 import { createMcpApp, type McpApp } from "../src/transport.js";
@@ -8,14 +9,37 @@ import { createMcpApp, type McpApp } from "../src/transport.js";
 describe.each(["2025-11-25", "2026-07-28"])("tool errors over %s", (version) => {
   let app: McpApp;
   let url: string;
-  const listNiches = vi.fn(async () => ({ isError: false as const, body: { data: [] } }));
+  let upstream: Server;
+  let requests = 0;
+  let status = 200;
+  let body: unknown = { data: [] };
+  let listNiches: ReturnType<typeof vi.fn<ReturnType<typeof createApiClient>["listNiches"]>>;
 
   beforeAll(async () => {
-    app = createMcpApp({ apiClient: { ...createApiClient({ baseUrl: "http://127.0.0.1:1" }), listNiches } });
+    upstream = createServer((_req, res) => {
+      requests++;
+      res.writeHead(status).end(JSON.stringify(body));
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const apiClient = createApiClient({ baseUrl: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}` });
+    listNiches = vi.fn(apiClient.listNiches);
+    app = createMcpApp({ apiClient: { ...apiClient, listNiches } });
     await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
     url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`;
   });
-  afterAll(async () => app.close());
+  beforeEach(() => {
+    requests = 0;
+    status = 200;
+    body = { data: [] };
+    listNiches.mockClear();
+  });
+  afterAll(async () => {
+    await app.close();
+    await new Promise<void>((resolve, reject) => {
+      upstream.close((error) => (error ? reject(error) : resolve()));
+      upstream.closeAllConnections();
+    });
+  });
 
   async function send(params: { name: string; arguments?: unknown }) {
     const response = await fetch(url, {
@@ -78,6 +102,47 @@ describe.each(["2025-11-25", "2026-07-28"])("tool errors over %s", (version) => 
     expect(body.error.details[0].suggestion).toEqual(expect.any(String));
     expect(JSON.stringify(body)).not.toContain("do-not-echo");
     expect(listNiches).not.toHaveBeenCalled();
+    expect(requests).toBe(0);
+  });
+
+  it.each([
+    ["list_niches", {}],
+    ["search_ads", { q: "serum" }],
+    ["get_ad", { id: "opaque-ad" }],
+  ])("preserves rate wait and quota reset envelopes for %s", async (name, args) => {
+    for (const code of ["RATE_LIMITED", "QUOTA_EXCEEDED"]) {
+      status = code === "RATE_LIMITED" ? 429 : 403;
+      body = {
+        error: {
+          code,
+          message: code === "RATE_LIMITED" ? "Wait 7 seconds." : "Monthly quota exhausted.",
+          next_action: code === "RATE_LIMITED" ? "Retry after 7 seconds." : "Wait until 2026-08-01T00:00:00.000Z.",
+          retryable: code === "RATE_LIMITED",
+          details: [
+            {
+              parameter: code === "RATE_LIMITED" ? "rate_limit" : "quota",
+              reason: "exhausted",
+              allowed_values: [],
+              suggestion: code === "RATE_LIMITED" ? "7" : "2026-08-01T00:00:00.000Z",
+            },
+          ],
+          extra: { preserved: true },
+        },
+      };
+      const before = requests;
+      const wire = await send({ name, arguments: args });
+      expect(wire.result).toEqual({
+        isError: true,
+        content: [{ type: "text", text: JSON.stringify(body) }],
+        ...(version === "2026-07-28"
+          ? {
+              resultType: "complete",
+              _meta: { "io.modelcontextprotocol/serverInfo": { name: "gethookd-mcp", version: "0.1.0" } },
+            }
+          : {}),
+      });
+      expect(requests - before).toBe(1);
+    }
   });
 
   it("keeps malformed call framing as a protocol failure", async () => {

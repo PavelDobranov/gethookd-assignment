@@ -81,7 +81,7 @@ describe("API HTTP boundary", () => {
     const result = await createApiClient({ baseUrl }).listNiches();
 
     expect(result.isError).toBe(true);
-    expect(result.body).toHaveProperty("error.code", "API_INVALID_RESPONSE");
+    expect(result.body).toHaveProperty("error.code", "INTERNAL_ERROR");
     expect(JSON.stringify(result)).not.toContain("secret internals");
   });
 
@@ -118,7 +118,10 @@ describe("API HTTP boundary", () => {
     const result = await createApiClient({ baseUrl, timeoutMs: 100 }).listNiches();
 
     expect(result.isError).toBe(true);
-    expect(result.body).toHaveProperty("error.code", "API_TIMEOUT");
+    expect(result.body).toHaveProperty("error.code", "INTERNAL_ERROR");
+    expect(result.body).toHaveProperty("error.retryable", false);
+    expect(result.body).toHaveProperty("error.next_action", expect.stringMatching(/same supplied idempotency_key/));
+    expect(JSON.stringify(result)).toContain("another successful call can charge again");
     expect(requests).toBe(1);
   });
 
@@ -126,7 +129,7 @@ describe("API HTTP boundary", () => {
     const baseUrl = await fixture((_req, res) => res.destroy(new Error("secret internals")));
     const result = await createApiClient({ baseUrl }).listNiches();
     expect(result.isError).toBe(true);
-    expect(result.body).toHaveProperty("error.code", "API_UNAVAILABLE");
+    expect(result.body).toHaveProperty("error.code", "INTERNAL_ERROR");
     expect(JSON.stringify(result)).not.toContain(baseUrl);
     expect(JSON.stringify(result)).not.toContain("secret internals");
   });

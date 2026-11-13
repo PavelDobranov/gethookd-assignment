@@ -14,7 +14,7 @@
     "ingest": "npm run ingest -w @gethookd/api",
     "db:studio": "npm run db:studio -w @gethookd/api",
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test -w @gethookd/api && npm run test -w @gethookd/web",
+    "test": "npm run test -w @gethookd/mcp && npm run test -w @gethookd/api && npm run test -w @gethookd/web",
     "lint": "biome lint .",
     "format": "biome format --write apps/ scripts/",
     "check": "biome check apps/ scripts/",

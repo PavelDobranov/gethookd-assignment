@@ -100,16 +100,26 @@ a fresh search without a cursor to clear filters.
   response: summaries (including full headlines/null ranks), normalized filter
   echo, effective sort/limit, next cursor and fixed expiry. REST cursor and
   validation errors retain their envelope; MCP does not restart searches.
-- Invalid arguments are rejected by SDK schema validation; `get_ad` and
-  `search_ads` reject unknown arguments. Keyword limits count Unicode code points
-  after outer whitespace, without altering the forwarded text.
+- All tools reject invalid/unknown arguments with a JSON `VALIDATION_ERROR`
+  envelope and parameter-specific guidance from their shared discovery schemas.
+  Public SDK dispatch/result projection supports the 2025 and 2026 protocol eras;
+  malformed framing remains a protocol failure, not a REST admission.
+  Keyword limits count Unicode code points after outer whitespace, without
+  altering the forwarded text.
+- Valid REST failures preserve their complete JSON envelope, including rate wait
+  and quota reset guidance. Malformed upstream responses, network failures,
+  timeouts and unexpected local exceptions become sanitized `INTERNAL_ERROR`
+  tool results. Delivery may already have settled billing: deliberate search/detail
+  retries should reuse the same supplied `idempotency_key`; without one, another
+  successful call can charge again. MCP never retries automatically.
+- Root `npm test` explicitly runs MCP, API unit/isolated PostgreSQL integration,
+  and web tests. No suite is optional.
 - Integration tests drive the real MCP protocol with the official client and
   a controlled HTTP API fixture; discovery does not make API requests.
 
 **Remaining for M5:**
 
-- Forward the caller's API key as a Bearer credential to the REST API; reuse the
-  v1 REST error codes rather than inventing an MCP-specific taxonomy.
+- Forward the caller's API key as a Bearer credential to the REST API.
 - Model evaluation evidence (`MCP_EVAL.md`).
 
 Authentication, authorization, scopes, rate limiting, metering and billing stay

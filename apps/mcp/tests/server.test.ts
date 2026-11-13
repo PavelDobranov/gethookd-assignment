@@ -98,8 +98,7 @@ describe("MCP server", () => {
       const result = await call;
       expect(result.isError).toBe(true);
       const [block] = result.content as Array<{ type: string; text: string }>;
-      expect(block.text).toContain("API_UNAVAILABLE");
-      expect(block.text).not.toContain("NOT_IMPLEMENTED");
+      expect(JSON.parse(block.text).error).toMatchObject({ code: "INTERNAL_ERROR", retryable: false });
     }
   });
 
@@ -108,8 +107,10 @@ describe("MCP server", () => {
 
     expect(result.isError).toBe(true);
     const [block] = result.content as Array<{ type: string; text: string }>;
-    expect(block.text).toMatch(/validation|invalid/i);
-    expect(block.text).not.toContain("NOT_IMPLEMENTED");
+    expect(JSON.parse(block.text).error).toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: [expect.objectContaining({ parameter: "limit" })],
+    });
   });
 
   it("rejects a missing required argument for get_ad", async () => {
@@ -117,7 +118,10 @@ describe("MCP server", () => {
 
     expect(result.isError).toBe(true);
     const [block] = result.content as Array<{ type: string; text: string }>;
-    expect(block.text).not.toContain("NOT_IMPLEMENTED");
+    expect(JSON.parse(block.text).error).toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: [expect.objectContaining({ parameter: "id" })],
+    });
   });
 });
 
@@ -196,7 +200,7 @@ describe("list_niches HTTP integration", () => {
     body = { data: "secret internals" };
     const result = await client.callTool({ name: "list_niches", arguments: {} });
     expect(result.isError).toBe(true);
-    expect(result.content).toEqual([{ type: "text", text: expect.stringContaining("API_INVALID_RESPONSE") }]);
+    expect(result.content).toEqual([{ type: "text", text: expect.stringContaining("INTERNAL_ERROR") }]);
     expect(JSON.stringify(result)).not.toContain("secret internals");
     expect(requests).toHaveLength(1);
   });

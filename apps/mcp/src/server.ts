@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/server";
+import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 
 import type { ApiClient } from "./api-client.js";
 import { internalToolError, type ToolDispatch, validationToolError } from "./tool-dispatch.js";
@@ -23,7 +23,7 @@ export function createMcpServer(apiClient: ApiClient): McpServer {
   // Override eager plain-text tool validation, not protocol framing validation.
   // Discovery and dispatch share each tool's schema; the SDK projects both eras.
   server.server.setRequestHandler("tools/call", async (request) => {
-    let result;
+    let result: CallToolResult;
     try {
       const dispatch = tools.get(request.params.name);
       result = dispatch

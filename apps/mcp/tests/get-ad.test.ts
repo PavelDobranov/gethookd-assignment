@@ -210,7 +210,7 @@ describe("get_ad protocol to HTTP boundary", () => {
     body = invalidBody;
     const result = await client.callTool({ name: "get_ad", arguments: { id: "ad_001" } });
     expect(result.isError).toBe(true);
-    expect(result.content).toEqual([{ type: "text", text: expect.stringContaining("API_INVALID_RESPONSE") }]);
+    expect(result.content).toEqual([{ type: "text", text: expect.stringContaining("INTERNAL_ERROR") }]);
     expect(requests).toHaveLength(1);
   });
 

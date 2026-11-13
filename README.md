@@ -199,7 +199,7 @@ Neither workflow requires deleting the database volume. Avoid
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | API unit + PostgreSQL integration tests, then Web component tests |
+| `npm test` | MCP protocol/HTTP tests, API unit + isolated PostgreSQL integration tests, then Web component tests |
 | `npm run build` | Type-check and build both workspaces |
 | `npm run lint` / `npm run check` | Biome lint / format+lint checks over `apps/` and `scripts/` |
 | `npm run db:generate` | Generate a new Drizzle migration (review and commit it) |

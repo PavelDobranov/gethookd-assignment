@@ -342,7 +342,7 @@ describe("search_ads protocol to HTTP boundary", () => {
     body = invalidBody;
     const result = await client.callTool({ name: "search_ads", arguments: {} });
     expect(result.isError).toBe(true);
-    expect(result.content).toEqual([{ type: "text", text: expect.stringContaining("API_INVALID_RESPONSE") }]);
+    expect(result.content).toEqual([{ type: "text", text: expect.stringContaining("INTERNAL_ERROR") }]);
     expect(requests).toHaveLength(1);
   });
 });
