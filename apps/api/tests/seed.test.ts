@@ -32,7 +32,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // Only this suite's database in the disposable test project is touched.
-  await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
+  await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
 });
 afterAll(close);
 

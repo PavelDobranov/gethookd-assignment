@@ -10,6 +10,7 @@ import { createDatabase } from "../src/db/client.js";
 import { generateFixtures } from "../src/db/fixtures.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
 import { seedWorld } from "../src/db/seed-world.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 const worldUrl = new URL(inject("postgresUrl"));
 worldUrl.pathname = "/gethookd_world_test";
@@ -32,7 +33,7 @@ beforeAll(async () => {
 afterAll(close);
 beforeEach(async () => {
   // Only this suite's database in the disposable test project is touched.
-  await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
+  await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
   await db.execute(sql`INSERT INTO brands (id, name) VALUES (1, 'First'), (2, 'Second')`);
   await db.insert(users).values({ id: ownerId, username: "owner", passwordHash: "test-hash" });
 });
@@ -139,7 +140,19 @@ it("round-trips domain fixtures through Drizzle and preserves all world records 
   const ad = generateFixtures().ads[0];
   const [stored] = await db.insert(ads).values(ad).returning();
   expect(stored).toEqual({ ...ad, insertedXid: expect.stringMatching(/^\d+$/) });
-  const keysBefore = await db.insert(apiKeys).values({ userId: ownerId, keyHash: "round-trip-hash" }).returning();
+  const keysBefore = await db.insert(apiKeys).values(apiKeyFixture(ownerId, "round-trip-hash")).returning();
+  expect(keysBefore).toEqual([
+    {
+      id: expect.any(String),
+      userId: ownerId,
+      keyHash: "round-trip-hash",
+      prefix: "test-fixture",
+      scopes: ["search:read", "keys:manage"],
+      createdAt: expect.any(Date),
+      lastUsedAt: null,
+      revokedAt: null,
+    },
+  ]);
   const brandsBefore = await db.select().from(brands).orderBy(brands.id);
   const usersBefore = await db.select().from(users);
   await migrate(db, { migrationsFolder: "drizzle" });
@@ -264,26 +277,31 @@ it("allows gaps, multiple nulls and equal cross-brand ranks, but not duplicate b
 
 it("generates UUID key identities, enforces unique hashes and user references, and permits multiple keys per user", async () => {
   const result = await db.execute(
-    sql`INSERT INTO api_keys (user_id, key_hash) VALUES (${ownerId}, 'first-hash'), (${ownerId}, 'second-hash') RETURNING id`,
+    sql`INSERT INTO api_keys (user_id, key_hash, prefix, scopes) VALUES
+      (${ownerId}, 'first-hash', 'test-fixture', ARRAY['search:read', 'keys:manage']),
+      (${ownerId}, 'second-hash', 'test-fixture', ARRAY['search:read', 'keys:manage']) RETURNING id`,
   );
   expect(result.rows).toHaveLength(2);
   for (const { id } of result.rows) expect(id).toMatch(/^[0-9a-f-]{36}$/);
   expect(result.rows[0].id).not.toBe(result.rows[1].id);
   await expect(
     db.execute(
-      sql`INSERT INTO api_keys (id, user_id, key_hash) VALUES (${result.rows[0].id}, ${ownerId}, 'third-hash')`,
+      sql`INSERT INTO api_keys (id, user_id, key_hash, prefix, scopes)
+        VALUES (${result.rows[0].id}, ${ownerId}, 'third-hash', 'test-fixture', ARRAY['search:read', 'keys:manage'])`,
     ),
   ).rejects.toMatchObject({
     cause: { code: "23505", constraint: "api_keys_pkey" },
   });
   await expect(
-    db.execute(sql`INSERT INTO api_keys (user_id, key_hash) VALUES (${ownerId}, 'first-hash')`),
+    db.execute(sql`INSERT INTO api_keys (user_id, key_hash, prefix, scopes)
+      VALUES (${ownerId}, 'first-hash', 'test-fixture', ARRAY['search:read', 'keys:manage'])`),
   ).rejects.toMatchObject({
     cause: { code: "23505", constraint: "api_keys_key_hash_unique" },
   });
   await expect(
     db.execute(
-      sql`INSERT INTO api_keys (user_id, key_hash) VALUES ('00000000-0000-0000-0000-000000000099', 'orphan-hash')`,
+      sql`INSERT INTO api_keys (user_id, key_hash, prefix, scopes)
+        VALUES ('00000000-0000-0000-0000-000000000099', 'orphan-hash', 'test-fixture', ARRAY['search:read', 'keys:manage'])`,
     ),
   ).rejects.toMatchObject({ cause: { code: "23503" } });
   await expect(db.execute(sql`DELETE FROM users WHERE id = ${ownerId}`)).rejects.toMatchObject({
@@ -296,6 +314,8 @@ it.each(["id", "user_id", "key_hash", "created_at"])("rejects NULL api_keys.%s",
     id: "00000000-0000-0000-0000-000000000002",
     user_id: ownerId,
     key_hash: "hash",
+    prefix: "test-fixture",
+    scopes: ["search:read", "keys:manage"],
     created_at: "2026-10-05T12:00:00Z",
     [column]: null,
   };

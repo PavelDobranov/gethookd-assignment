@@ -11,6 +11,7 @@ import { generateFixtures } from "../src/db/fixtures.js";
 import { ads, apiKeys, brands, users } from "../src/db/schema.js";
 import { seedDatabase } from "../src/db/seed.js";
 import { seedWorld } from "../src/db/seed-world.js";
+import { apiKeyFixture } from "./api-key-fixtures.js";
 
 // Both databases belong exclusively to the disposable PostgreSQL test server.
 const postgresUrl = inject("postgresUrl");
@@ -58,7 +59,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   for (const { db } of connections) {
-    await db.execute(sql`TRUNCATE api_keys, ads, brands, users`);
+    await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
   }
 });
 afterAll(async () => {
@@ -174,7 +175,18 @@ it("preserves all evolved records through initialization and seed while restorin
     .values({ username: "unrelated", passwordHash: "test-only-hash" })
     .returning();
   await db.update(apiKeys).set({ userId: unrelated.id });
-  await db.insert(apiKeys).values({ userId: unrelated.id, keyHash: "unrelated-key-hash" });
+  await db.insert(apiKeys).values(apiKeyFixture(unrelated.id, "unrelated-key-hash"));
+  const [unrelatedKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, "unrelated-key-hash"));
+  expect(unrelatedKey).toEqual({
+    id: expect.any(String),
+    userId: unrelated.id,
+    keyHash: "unrelated-key-hash",
+    prefix: "test-fixture",
+    scopes: ["search:read", "keys:manage"],
+    createdAt: expect.any(Date),
+    lastUsedAt: null,
+    revokedAt: null,
+  });
   await db.update(brands).set({ name: "Evolved brand" }).where(eq(brands.id, 2));
   await db
     .update(ads)
