@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
 import type { ApiClient } from "../api-client.js";
+import { registerValidatedTool, type ToolDispatch } from "../tool-dispatch.js";
 
 const description = [
   "Retrieve the complete details of a single GetHookd advertisement by its id.",
@@ -10,8 +11,9 @@ const description = [
   "The id is an opaque string returned by search_ads and must not be parsed or treated as an integer.",
 ].join(" ");
 
-export function registerGetAd(server: McpServer, apiClient: ApiClient): void {
-  server.registerTool(
+export function registerGetAd(server: McpServer, apiClient: ApiClient): ToolDispatch {
+  return registerValidatedTool(
+    server,
     "get_ad",
     {
       title: "Get ad",

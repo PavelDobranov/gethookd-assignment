@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
 import type { ApiClient } from "../api-client.js";
+import { registerValidatedTool, type ToolDispatch } from "../tool-dispatch.js";
 
 // Canonical niche slugs from the v1 contract. Kept local to the MCP app so it
 // stays independent of API code; discovery at runtime is what `list_niches` is
@@ -33,8 +34,9 @@ const description = [
   "Retrieve the full details of a specific ad with get_ad.",
 ].join(" ");
 
-export function registerSearchAds(server: McpServer, apiClient: ApiClient): void {
-  server.registerTool(
+export function registerSearchAds(server: McpServer, apiClient: ApiClient): ToolDispatch {
+  return registerValidatedTool(
+    server,
     "search_ads",
     {
       title: "Search ads",

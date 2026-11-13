@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 
 import type { ApiClient } from "./api-client.js";
+import { internalToolError, type ToolDispatch, validationToolError } from "./tool-dispatch.js";
 import { registerGetAd } from "./tools/get-ad.js";
 import { registerListNiches } from "./tools/list-niches.js";
 import { registerSearchAds } from "./tools/search-ads.js";
@@ -13,9 +14,33 @@ import { registerSearchAds } from "./tools/search-ads.js";
 export function createMcpServer(apiClient: ApiClient): McpServer {
   const server = new McpServer({ name: "gethookd-mcp", version: "0.1.0" });
 
-  registerSearchAds(server, apiClient);
-  registerGetAd(server, apiClient);
-  registerListNiches(server, apiClient);
+  const tools = new Map<string, ToolDispatch>([
+    ["search_ads", registerSearchAds(server, apiClient)],
+    ["get_ad", registerGetAd(server, apiClient)],
+    ["list_niches", registerListNiches(server, apiClient)],
+  ]);
+
+  // Override eager plain-text tool validation, not protocol framing validation.
+  // Discovery and dispatch share each tool's schema; the SDK projects both eras.
+  server.server.setRequestHandler("tools/call", async (request) => {
+    let result;
+    try {
+      const dispatch = tools.get(request.params.name);
+      result = dispatch
+        ? await dispatch(request.params.arguments ?? {})
+        : validationToolError([
+            {
+              parameter: "name",
+              reason: "Unknown tool name.",
+              allowed_values: [...tools.keys()],
+              suggestion: "Choose a tool returned by tools/list.",
+            },
+          ]);
+    } catch {
+      result = internalToolError();
+    }
+    return server.server.projectCallToolResult(result, undefined);
+  });
 
   return server;
 }
