@@ -124,6 +124,19 @@ a fresh search without a cursor to clear filters.
   JWT substituted for an API key and absent/malformed/unknown credentials are
   classified as `UNAUTHENTICATED`, and revoking a key through the REST key API
   blocks the next MCP call. Fixtures live in the API tests, not MCP code.
+- A second API-side suite (`@gethookd/api`
+  `tests/mcp-controls.integration.test.ts`, same isolated-PostgreSQL gate) proves
+  mixed MCP/direct-REST accounting against the single REST meter: search and
+  detail successes charge (including empty searches and each cursor page) while
+  `list_niches` and failed reads do not; equal no-header successes charge
+  separately and the API (`/api/v1/usage`) and portal (`/api/portal/usage`) reads
+  agree with the meter. A supplied `idempotency_key` deduplicates across both
+  channels on one key — including a synchronized concurrent cohort that settles
+  once — a changed request reusing the identity conflicts with
+  `IDEMPOTENCY_CONFLICT` on either channel, and different keys keep independent
+  namespaces. A deduplicated retry returns current data for free, and MCP calls
+  without a supplied key generate no implicit identity (no second meter, no
+  JSON-RPC/session dedup).
 
 **Authentication:** each caller sends `Authorization: Bearer <API key>` on the MCP
 request. The server reads Node's raw headers before SDK normalization and accepts

@@ -9,6 +9,7 @@ export default defineConfig({
           include: ["tests/**/*.test.ts"],
           exclude: [
             "tests/mcp-auth.integration.test.ts",
+            "tests/mcp-controls.integration.test.ts",
             "tests/portal-openapi.test.ts",
             "tests/http-accounting.test.ts",
             "tests/key-management.test.ts",
@@ -45,6 +46,7 @@ export default defineConfig({
           fileParallelism: false,
           include: [
             "tests/mcp-auth.integration.test.ts",
+            "tests/mcp-controls.integration.test.ts",
             "tests/portal-openapi.test.ts",
             "tests/http-accounting.test.ts",
             "tests/key-management.test.ts",
