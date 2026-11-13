@@ -13,11 +13,11 @@ stays small.
 
 | Milestone | Assignment part | Time | Main tools |
 |---|---|---|---|
-| M1 — Foundation & protected portal | Baseline for Part 4 (login, portal) | ~2.5 h | PI coding agent, Claude Code |
-| M2 — World & v0 | Part 0 | ~2 h | PI coding agent, Claude Code |
-| M3 — Strict v1 search | Part 1 | ~2 h | PI coding agent, Claude Code |
-| M4 — Keys, usage & portal | Part 3 + Part 4 | ~2.5 h | PI coding agent, Claude Code, Claude Design (portal UI) |
-| M5 — MCP & evaluation | Part 2 | ~1 h | PI coding agent, Claude Code (also the MCP eval client) |
+| M1 — Foundation & protected portal | Baseline for Part 4 (login, portal) | ~2.5 h | PI coding agent |
+| M2 — World & v0 | Part 0 |~2.5 h | PI coding agent |
+| M3 — Strict v1 search | Part 1 | ~2.5 h | PI coding agent |
+| M4 — Keys, usage & portal | Part 3 + Part 4 | ~2.5 h | PI coding agent, Claude Design (portal UI) |
+| M5 — MCP & evaluation | Part 2 | ~2 h | PI coding agent, Claude Code (also the MCP eval client) |
 
 ## Where the AI got it wrong
 
