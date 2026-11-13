@@ -112,6 +112,22 @@ it.each(["success", "rejected", "unavailable"])("handles clipboard %s with selec
   if (kind !== "unavailable") expect(copy).toHaveBeenCalledWith(secret);
 });
 
+it("does not let late clipboard feedback restore a dismissed secret", async () => {
+  const keyboard = userEvent.setup();
+  const pending = deferred<void>();
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => pending.promise } });
+  mount();
+  await keyboard.click(screen.getByLabelText("search:read"));
+  await keyboard.click(screen.getByRole("button", { name: "Create key" }));
+  await screen.findByLabelText("New API key");
+  await keyboard.click(screen.getByRole("button", { name: "Copy secret" }));
+  await keyboard.click(screen.getByRole("button", { name: "Dismiss secret" }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Create key" }));
+  await act(async () => pending.resolve());
+  expect(screen.queryByLabelText("New API key")).toBeNull();
+  expect(screen.queryByText("Secret copied.")).toBeNull();
+});
+
 it("explains unknown creation outcomes without retrying and permits explicit recovery", async () => {
   vi.mocked(api.createKey).mockRejectedValue(new PortalError("network", undefined, undefined, true));
   mount();
@@ -136,6 +152,7 @@ it("paginates, refreshes, displays dates and handles loading, empty and failed r
   await keyboard.click(screen.getByRole("button", { name: "Next page" }));
   expect(await screen.findByText("second-page")).toBeDefined();
   expect(api.listKeys).toHaveBeenLastCalledWith("session-one", { offset: 20 });
+  expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Your API keys" }));
   expect(screen.getByText("Revoked")).toBeDefined();
   expect(screen.getAllByText(metadata.created_at)).toHaveLength(3);
   vi.mocked(api.listKeys).mockRejectedValueOnce(new PortalError("server"));
@@ -179,6 +196,107 @@ it.each(["unmount", "user", "token"])("ignores late metadata and creation after 
   });
   expect(screen.queryByLabelText("New API key")).toBeNull();
   expect(screen.queryByText(metadata.prefix)).toBeNull();
+});
+
+it("confirms permanent revocation, cancels without a request, and refreshes only after success", async () => {
+  vi.mocked(api.listKeys).mockResolvedValue({ ...empty, data: [metadata] });
+  const pending = deferred<void>();
+  vi.mocked(api.revokeKey).mockReturnValueOnce(pending.promise);
+  mount();
+  const keyboard = userEvent.setup();
+  await keyboard.click(await screen.findByRole("button", { name: `Revoke ${metadata.prefix}` }));
+  expect(screen.getByText(/Revocation is permanent/)).toBeDefined();
+  await keyboard.click(screen.getByRole("button", { name: "Cancel revocation" }));
+  expect(api.revokeKey).not.toHaveBeenCalled();
+  screen.getByRole("button", { name: `Revoke ${metadata.prefix}` }).focus();
+  await keyboard.keyboard("{Enter}");
+  screen.getByRole("button", { name: "Confirm permanent revocation" }).focus();
+  await keyboard.keyboard("{Enter}");
+  expect(api.revokeKey).toHaveBeenCalledWith("session-one", metadata.id);
+  expect(screen.getByText("Active")).toBeDefined();
+  expect(screen.queryByText("Revoked")).toBeNull();
+  await keyboard.click(screen.getByRole("button", { name: "Revoking…" }));
+  expect(api.revokeKey).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole("button", { name: "Refresh keys" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Create key" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement).disabled).toBe(true);
+  await keyboard.click(screen.getByRole("button", { name: "Refresh keys" }));
+  expect(api.listKeys).toHaveBeenCalledTimes(1);
+  vi.mocked(api.listKeys).mockResolvedValue({ ...empty, data: [{ ...metadata, revoked_at: metadata.created_at }] });
+  await act(async () => pending.resolve());
+  expect(await screen.findByText("Revoked")).toBeDefined();
+  expect(screen.queryByRole("button", { name: `Revoke ${metadata.prefix}` })).toBeNull();
+  expect(screen.queryByRole("button", { name: /reactivate/i })).toBeNull();
+  expect(api.listKeys).toHaveBeenCalledTimes(2);
+});
+
+it.each(["server", "network", "not_found"] as const)(
+  "keeps %s revoke failures truthful and retryable",
+  async (kind) => {
+    vi.mocked(api.listKeys).mockResolvedValue({ ...empty, data: [metadata] });
+    vi.mocked(api.revokeKey).mockRejectedValueOnce(new PortalError(kind));
+    mount();
+    const keyboard = userEvent.setup();
+    await keyboard.click(await screen.findByRole("button", { name: `Revoke ${metadata.prefix}` }));
+    await keyboard.click(screen.getByRole("button", { name: "Confirm permanent revocation" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Revocation was not confirmed/);
+    expect(screen.getByText("Active")).toBeDefined();
+    expect(api.listKeys).toHaveBeenCalledTimes(1);
+    expect(logout).not.toHaveBeenCalled();
+    vi.mocked(api.revokeKey).mockResolvedValueOnce();
+    vi.mocked(api.listKeys).mockRejectedValueOnce(new PortalError("server"));
+    await keyboard.click(screen.getByRole("button", { name: "Confirm permanent revocation" }));
+    expect(await screen.findByText(/Revocation confirmed/)).toBeDefined();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/could not complete/i);
+    expect(screen.queryByText("Active")).toBeNull();
+  },
+);
+
+it("preserves the selected page on revocation and refresh", async () => {
+  vi.mocked(api.listKeys).mockResolvedValueOnce({ ...empty, data: [metadata], has_more: true });
+  mount();
+  const keyboard = userEvent.setup();
+  await screen.findByText(metadata.prefix);
+  vi.mocked(api.listKeys).mockResolvedValue({ ...empty, offset: 20, data: [metadata] });
+  await keyboard.click(screen.getByRole("button", { name: "Next page" }));
+  await keyboard.click(await screen.findByRole("button", { name: `Revoke ${metadata.prefix}` }));
+  vi.mocked(api.revokeKey).mockResolvedValueOnce();
+  vi.mocked(api.listKeys).mockResolvedValue({ ...empty, offset: 20 });
+  await keyboard.click(screen.getByRole("button", { name: "Confirm permanent revocation" }));
+  expect(await screen.findByText("No keys on this page.")).toBeDefined();
+  expect(api.listKeys).toHaveBeenLastCalledWith("session-one", { offset: 20 });
+  await keyboard.click(screen.getByRole("button", { name: "Previous page" }));
+  await waitFor(() => expect(api.listKeys).toHaveBeenLastCalledWith("session-one", { offset: 0 }));
+});
+
+it("routes revoke JWT401 through the established logout callback", async () => {
+  vi.mocked(api.listKeys).mockResolvedValue({ ...empty, data: [metadata] });
+  vi.mocked(api.revokeKey).mockRejectedValueOnce(new PortalError("unauthenticated"));
+  mount();
+  const keyboard = userEvent.setup();
+  await keyboard.click(await screen.findByRole("button", { name: `Revoke ${metadata.prefix}` }));
+  await keyboard.click(screen.getByRole("button", { name: "Confirm permanent revocation" }));
+  expect(logout).toHaveBeenCalledTimes(1);
+});
+
+it.each(["success", "unauthenticated"])("ignores late revoke %s after logout/unmount", async (outcome) => {
+  vi.mocked(api.listKeys).mockResolvedValueOnce({ ...empty, data: [metadata] });
+  const pending = deferred<void>();
+  vi.mocked(api.revokeKey).mockReturnValueOnce(pending.promise);
+  const view = mount();
+  const keyboard = userEvent.setup();
+  await keyboard.click(await screen.findByRole("button", { name: `Revoke ${metadata.prefix}` }));
+  await keyboard.click(screen.getByRole("button", { name: "Confirm permanent revocation" }));
+  view.unmount();
+  mount();
+  await act(async () => {
+    if (outcome === "success") pending.resolve();
+    else pending.reject(new PortalError("unauthenticated"));
+  });
+  expect(screen.queryByText(metadata.prefix)).toBeNull();
+  expect(screen.queryByText(/Revocation confirmed/)).toBeNull();
+  expect(logout).not.toHaveBeenCalled();
+  expect(api.listKeys).toHaveBeenCalledTimes(2);
 });
 
 it("ignores stale JWT failures after an identity change", async () => {

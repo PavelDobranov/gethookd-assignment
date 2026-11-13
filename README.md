@@ -691,7 +691,12 @@ failure. Dismiss, logout, identity/credential change, unmount or reload clears t
 view. No secret is written to browser storage. Creation is never automatically
 retried: if delivery is uncertain, refresh the metadata list and revoke the orphan
 before explicitly creating another key. The metadata list supports all pages,
-manual refresh and truthful loading/empty/error states. Stale responses cannot
+manual refresh and truthful loading/empty/error states. Active rows offer an
+explicit permanent revocation confirmation. Cancel sends no request; only a
+confirmed API success triggers a metadata refresh on the current page. Failures
+remain retryable without claiming the key is revoked. Revoked rows have no
+reactivation action. JWT 401 returns to login; service failures do not log out.
+Stale responses cannot
 restore old key data or secrets after a session transition. Component/client tests
 cover these boundaries; real-browser verification remains a separate M4 rollout
 task.

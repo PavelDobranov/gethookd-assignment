@@ -284,6 +284,89 @@ it("revalidates a back-forward cache restoration", async () => {
   expect(location.pathname).toBe("/login");
 });
 
+it.each(["logout", "navigation", "bfcache"])(
+  "clears a revealed key on %s and never persists it",
+  async (transition) => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+    const secret = `ghk_${"a".repeat(43)}`;
+    fetchMock.mockResolvedValueOnce(Response.json({ user })).mockResolvedValueOnce(
+      Response.json(
+        {
+          secret,
+          data: {
+            id: "11111111-1111-4111-8111-111111111111",
+            prefix: secret.slice(0, 12),
+            scopes: ["search:read"],
+            created_at: "2026-01-01T00:00:00.000Z",
+            last_used_at: null,
+            revoked_at: null,
+          },
+        },
+        { status: 201 },
+      ),
+    );
+    render(<App />);
+    const keyboard = userEvent.setup();
+    await keyboard.click(await screen.findByLabelText("search:read"));
+    await keyboard.click(screen.getByRole("button", { name: "Create key" }));
+    expect(((await screen.findByLabelText("New API key")) as HTMLInputElement).value).toBe(secret);
+    expect(sessionStorage.length).toBe(1);
+    expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe(token);
+    expect(localStorage.length).toBe(0);
+    if (transition === "logout") await keyboard.click(screen.getByRole("button", { name: "Log out" }));
+    else {
+      fetchMock.mockResolvedValueOnce(Response.json({ user }));
+      act(() =>
+        window.dispatchEvent(
+          transition === "navigation"
+            ? new PopStateEvent("popstate")
+            : new PageTransitionEvent("pageshow", { persisted: true }),
+        ),
+      );
+      await screen.findByText(user.username);
+    }
+    expect(screen.queryByLabelText("New API key")).toBeNull();
+    expect(document.body.textContent).not.toContain(secret);
+  },
+);
+
+it("does not reveal a late created secret after logout", async () => {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  let resolve: (value: Response) => void = () => {};
+  fetchMock.mockResolvedValueOnce(Response.json({ user })).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  render(<App />);
+  const keyboard = userEvent.setup();
+  await keyboard.click(await screen.findByLabelText("search:read"));
+  await keyboard.click(screen.getByRole("button", { name: "Create key" }));
+  await keyboard.click(screen.getByRole("button", { name: "Log out" }));
+  const secret = `ghk_${"b".repeat(43)}`;
+  await act(async () =>
+    resolve(
+      Response.json(
+        {
+          secret,
+          data: {
+            id: "11111111-1111-4111-8111-111111111111",
+            prefix: secret.slice(0, 12),
+            scopes: ["search:read"],
+            created_at: "2026-01-01T00:00:00.000Z",
+            last_used_at: null,
+            revoked_at: null,
+          },
+        },
+        { status: 201 },
+      ),
+    ),
+  );
+  expect(screen.getByLabelText("Username")).toBeDefined();
+  expect(screen.queryByLabelText("New API key")).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+});
+
 it("ignores a restored identity response after unmount", async () => {
   sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
   let resolve: (value: Response) => void = () => {};

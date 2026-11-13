@@ -1,6 +1,14 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import { createKey, type KeyList, type KeyScope, listKeys, PortalError } from "./portal-api";
+import {
+  createKey,
+  type KeyList,
+  type KeyMetadata,
+  type KeyScope,
+  listKeys,
+  PortalError,
+  revokeKey,
+} from "./portal-api";
 
 interface PortalProps {
   token: string;
@@ -22,11 +30,31 @@ function KeyPortal({ token, onUnauthenticated }: PortalProps) {
   const [page, setPage] = useState<KeyList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [mutating, setMutating] = useState(false);
+  const listHeading = useRef<HTMLHeadingElement>(null);
+  const focusList = useRef(false);
   const refresh = useCallback(() => {
+    focusList.current = true;
     setPagination((value) => ({ ...value }));
   }, []);
+  function navigatePage(offset: number) {
+    focusList.current = true;
+    setPagination({ offset });
+  }
+  useEffect(() => {
+    if (!loading && focusList.current) {
+      listHeading.current?.focus();
+      focusList.current = false;
+    }
+  }, [loading]);
   const created = () => {
+    setNotice("");
     setPagination({ offset: 0 });
+  };
+  const revoked = () => {
+    setNotice("Revocation confirmed. Refresh the list if updated metadata is unavailable.");
+    refresh();
   };
 
   useEffect(() => {
@@ -57,14 +85,23 @@ function KeyPortal({ token, onUnauthenticated }: PortalProps) {
 
   return (
     <div className="portal">
-      <CreateKeyForm token={token} onCreated={created} onUnauthenticated={onUnauthenticated} />
+      <CreateKeyForm
+        token={token}
+        onCreated={created}
+        onUnauthenticated={onUnauthenticated}
+        disabled={mutating}
+        onPendingChange={setMutating}
+      />
       <section aria-labelledby="keys-heading" aria-busy={loading}>
         <div className="section-heading">
-          <h2 id="keys-heading">Your API keys</h2>
-          <button type="button" onClick={refresh} disabled={loading}>
+          <h2 ref={listHeading} tabIndex={-1} id="keys-heading">
+            Your API keys
+          </h2>
+          <button type="button" onClick={refresh} disabled={loading || mutating}>
             Refresh keys
           </button>
         </div>
+        {notice && <p role="status">{notice}</p>}
         {loading && <p role="status">Loading keys…</p>}
         {error && <p role="alert">{error}</p>}
         {page && (
@@ -98,6 +135,17 @@ function KeyPortal({ token, onUnauthenticated }: PortalProps) {
                         )}
                       </dd>
                     </dl>
+                    {!key.revoked_at && (
+                      <RevokeKey
+                        keyId={key.id}
+                        prefix={key.prefix}
+                        token={token}
+                        onRevoked={revoked}
+                        onUnauthenticated={onUnauthenticated}
+                        disabled={mutating}
+                        onPendingChange={setMutating}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -105,13 +153,17 @@ function KeyPortal({ token, onUnauthenticated }: PortalProps) {
             <nav className="actions" aria-label="Key list pages">
               <button
                 type="button"
-                disabled={page.offset === 0}
-                onClick={() => setPagination({ offset: Math.max(0, page.offset - page.limit) })}
+                disabled={page.offset === 0 || mutating}
+                onClick={() => navigatePage(Math.max(0, page.offset - page.limit))}
               >
                 Previous page
               </button>
               <span>Page {Math.floor(page.offset / page.limit) + 1}</span>
-              <button type="button" disabled={!page.has_more} onClick={() => setPagination({ offset: page.offset + page.limit })}>
+              <button
+                type="button"
+                disabled={!page.has_more || mutating}
+                onClick={() => navigatePage(page.offset + page.limit)}
+              >
                 Next page
               </button>
             </nav>
@@ -122,11 +174,108 @@ function KeyPortal({ token, onUnauthenticated }: PortalProps) {
   );
 }
 
+interface MutationProps {
+  disabled: boolean;
+  onPendingChange: (pending: boolean) => void;
+}
+
+function RevokeKey({
+  keyId,
+  prefix,
+  token,
+  onRevoked,
+  onUnauthenticated,
+  disabled,
+  onPendingChange,
+}: Omit<PortalProps, "userId"> &
+  MutationProps & {
+    keyId: KeyMetadata["id"];
+    prefix: string;
+    onRevoked: () => void;
+  }) {
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const lifetime = useRef(0);
+  const submitting = useRef(false);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const revokeButton = useRef<HTMLButtonElement>(null);
+  const opened = useRef(false);
+  useEffect(
+    () => () => {
+      lifetime.current++;
+    },
+    [],
+  );
+  useEffect(() => {
+    if (confirming) {
+      opened.current = true;
+      cancelButton.current?.focus();
+    } else if (opened.current) revokeButton.current?.focus();
+  }, [confirming]);
+
+  async function confirm() {
+    if (submitting.current || disabled) return;
+    const request = lifetime.current;
+    submitting.current = true;
+    setPending(true);
+    onPendingChange(true);
+    setError("");
+    try {
+      await revokeKey(token, keyId);
+      if (request === lifetime.current) onRevoked();
+    } catch (failure) {
+      if (request !== lifetime.current) return;
+      if (failure instanceof PortalError && failure.kind === "unauthenticated") onUnauthenticated();
+      else
+        setError(
+          `Revocation was not confirmed. ${message(failure)} Refresh to check its current state, or retry revocation.`,
+        );
+    } finally {
+      if (request === lifetime.current) {
+        submitting.current = false;
+        setPending(false);
+        onPendingChange(false);
+      }
+    }
+  }
+  if (!confirming)
+    return (
+      <button ref={revokeButton} type="button" disabled={disabled} onClick={() => setConfirming(true)}>
+        Revoke {prefix}
+      </button>
+    );
+  return (
+    <fieldset disabled={pending || disabled}>
+      <legend>Revoke {prefix}?</legend>
+      <p>Revocation is permanent. Requests using this key will be rejected; it cannot be reactivated.</p>
+      <div className="actions">
+        <button type="button" onClick={() => void confirm()}>
+          {pending ? "Revoking…" : "Confirm permanent revocation"}
+        </button>
+        <button
+          ref={cancelButton}
+          type="button"
+          onClick={() => {
+            setConfirming(false);
+            setError("");
+          }}
+        >
+          Cancel revocation
+        </button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+    </fieldset>
+  );
+}
+
 function CreateKeyForm({
   token,
   onCreated,
   onUnauthenticated,
-}: Omit<PortalProps, "userId"> & { onCreated: () => void }) {
+  disabled,
+  onPendingChange,
+}: Omit<PortalProps, "userId"> & MutationProps & { onCreated: () => void }) {
   const [scopes, setScopes] = useState<KeyScope[]>([]);
   const [pending, setPending] = useState(false);
   const [secret, setSecret] = useState("");
@@ -157,10 +306,11 @@ function CreateKeyForm({
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting.current || scopes.length === 0 || secret) return;
+    if (submitting.current || disabled || scopes.length === 0 || secret) return;
     const request = lifetime.current;
     submitting.current = true;
     setPending(true);
+    onPendingChange(true);
     setError("");
     setFeedback("");
     try {
@@ -177,6 +327,7 @@ function CreateKeyForm({
       if (request === lifetime.current) {
         submitting.current = false;
         setPending(false);
+        onPendingChange(false);
       }
     }
   }
@@ -203,7 +354,7 @@ function CreateKeyForm({
       <h2 id="create-heading">Create an API key</h2>
       <p>Choose only the permissions this key needs. Scopes cannot be changed later.</p>
       <form onSubmit={submit} aria-busy={pending}>
-        <fieldset disabled={pending || Boolean(secret)}>
+        <fieldset disabled={disabled || pending || Boolean(secret)}>
           <legend>Key scopes (select at least one)</legend>
           <label>
             <input type="checkbox" checked={scopes.includes("search:read")} onChange={() => toggle("search:read")} />{" "}
@@ -214,7 +365,11 @@ function CreateKeyForm({
             keys:manage
           </label>
         </fieldset>
-        <button ref={createButton} type="submit" disabled={pending || scopes.length === 0 || Boolean(secret)}>
+        <button
+          ref={createButton}
+          type="submit"
+          disabled={disabled || pending || scopes.length === 0 || Boolean(secret)}
+        >
           {pending ? "Creating…" : "Create key"}
         </button>
       </form>
