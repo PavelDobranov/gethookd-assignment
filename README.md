@@ -1,267 +1,203 @@
 # GetHookd
 
-GetHookd is an ad-intelligence platform. It collects advertiser creatives ("ads")
-and exposes them through a REST API for search and discovery, alongside a developer
-portal where users sign in, mint scoped API keys, and track their usage against a
-monthly quota.
+GetHookd is a developer platform for discovering and analyzing advertising creatives. It combines a searchable REST API, a developer portal for managing API access, and an MCP server for AI agents.
 
-The repository is an npm-workspaces monorepo with two applications — a backend
-**API** and a browser **Web** app — backed by **PostgreSQL**.
+This technical-assessment repository is an **npm-workspaces monorepo** with three applications (Web, API, and MCP) backed by PostgreSQL.
+
+## Features
+
+- **Ad discovery:** REST API with search filters, opaque cursor pagination, and ad details. The API supports a legacy `v0` contract and the current `v1` contract.
+- **Developer Portal:** Sign in, create scoped API keys, revoke keys, and inspect monthly usage.
+- **MCP tools:** `search_ads`, `get_ad`, and `list_niches` exposed over Streamable HTTP.
+- **Shared API controls:** Authentication, scopes, rate limits, idempotency, and usage/billing are enforced by the REST API rather than duplicated in MCP.
+
+**M5 status:** The MCP server and its three REST-backed tools are implemented. Each tool call forwards the caller's own `Authorization: Bearer <key>` to the REST API per request — no shared key or API bypass — so REST stays the sole authority for key validity, scopes, revocation, rate limits, and billing. Protocol tests exercise the tools against a controlled HTTP API fixture. Real-model evaluation evidence is the remaining M5 work. See [MCP implementation and limitations](apps/mcp/README.md).
 
 ## Architecture
 
-```
-                      ┌─────────────────────────────┐
-   Browser  ────────▶ │  Web  (apps/web)            │
-                      │  React SPA · Nginx (prod)   │
-                      └──────────────┬──────────────┘
-                                     │  /api  (reverse proxy)
-                                     ▼
-   MCP server ─ ─ ─ ─ ─ ─ ─▶ ┌──────────────────────┐
-   (planned, M5)   HTTP      │  API  (apps/api)     │
-                             │  Express REST        │
-                             └──────────┬───────────┘
-                                        │  SQL
-                                        ▼
-                             ┌──────────────────────┐
-                             │  PostgreSQL 17       │
-                             └──────────────────────┘
+```text
+Browser ──▶ Web (React / Vite or Nginx) ── /api proxy ──┐
+                                                      │
+MCP client ──▶ MCP (Streamable HTTP, :3001) ── HTTP ───┤
+                                                      ▼
+                                              API (Express, :3000)
+                                                      │
+                                                      ▼
+                                                PostgreSQL 17
 ```
 
-### Components
+| Component | Responsibility |
+| --- | --- |
+| `apps/web` | React 19, TypeScript, and Vite SPA for login, API keys, and usage. Nginx serves the build and proxies `/api` in Docker. |
+| `apps/api` | Express 5 REST API for auth, keys, search, ingestion, rate limits, metering, and billing; owns all database access through Drizzle ORM. |
+| `apps/mcp` | Independent Node.js/TypeScript MCP server; communicates with the API over HTTP only and never accesses PostgreSQL directly. |
+| PostgreSQL 17 | Stores users, API keys, brands, ads, and billing records. Schema migrations live in `apps/api/drizzle/`. |
 
-- **Web — `apps/web`** (React 19 + Vite, TypeScript). The customer-facing
-  single-page app: the login/auth flow and the developer portal for API-key
-  management and usage. In production it is a static bundle served by Nginx, which
-  also reverse-proxies `/api` to the API. Entry point: `src/main.tsx`.
+The browser uses a same-origin `/api` proxy (Vite in development, Nginx in Docker). Portal routes use Bearer JWTs; `/api/v1` uses scoped Bearer API keys (`search:read`, `keys:manage`). `JWT_SECRET` signs JWTs and a separate `CURSOR_SECRET` signs pagination cursors.
 
-- **API — `apps/api`** (Express 5, Drizzle ORM, `pg`, `jose`, `zod`). The backend
-  REST service. It owns user authentication, the API-key lifecycle, ad search (the
-  legacy `v0` contract and the current `v1` contract), usage/billing metering, the
-  live-ingest job, and the database schema, migrations, and seed. Entry points:
-  `src/server.ts` (HTTP server), `src/app.ts` (app wiring), `src/db/initialize.ts`
-  (one-shot migrate + seed), `src/ingest/cli.ts` (ingest).
+## Quick Start
 
-- **PostgreSQL 17.** The single source of truth: users, API keys, brands, ads, and
-  usage/billing records. The API reaches it through Drizzle; schema changes are
-  committed SQL migrations under `apps/api/drizzle/`.
+### Prerequisites
 
-- **MCP server — _planned (M5)._** A future Model Context Protocol server that will
-  expose the API's search as REST-backed MCP tools. It does not exist yet; when
-  built it will call the API over HTTP, just like the Web app.
+- Node.js **26.13.0** (see `.nvmrc`) and npm.
+- Docker Engine / Docker Desktop and Docker Compose v2 (with `up --wait` support).
+- Available ports: `5432` (database), `3000` (API), `5173` (Web), and `3001` if running MCP. The Docker Web server uses `8080`.
+- No `.env` file is required for the local demo.
 
-### How the parts communicate
-
-- **Routes.** The API serves `/api/health`, `/api/auth` and `/api/portal`
-  (session-based), `/api/v0` (legacy), and `/api/v1` (current).
-- **Ports.** Dev: Web (Vite) on `5173`, API on `3000`, PostgreSQL on `5432`. Prod:
-  Web (Nginx) on `8080`, API on `3000`, PostgreSQL on `5432` — all bound to
-  loopback only.
-- **Proxy.** The browser only talks to the Web origin; `/api` requests are proxied
-  to the API (by Vite in dev, by Nginx in prod). Unknown `/api` paths keep the
-  API's own 404 rather than falling back to the SPA.
-- **Credentials.** Three kinds, all server-side secrets: a user **JWT**
-  (`JWT_SECRET`) for the portal/auth routes; stored **Bearer API keys** with scopes
-  (`search:read`, `keys:manage`) for `/api/v1`; and a separate **cursor secret**
-  (`CURSOR_SECRET`) that signs opaque pagination cursors.
-
-## Prerequisites
-
-- **Node** `26.13.0` (see `.nvmrc`) and **npm**.
-- **Docker Engine** and **Docker Compose v2** (supporting `up --wait`).
-- Free ports: `5432`, `3000`, and `5173` for local development; `8080` for the full
-  Docker stack.
-- No `.env` is required — the defaults are public development fixtures.
-
-## Local development
-
-Start Docker Engine / Docker Desktop first, then follow these steps in order.
-
-### 1. Install dependencies
+Start Docker first, then run from the repository root:
 
 ```sh
-nvm use          # Node 26.13.0
+nvm use
 npm ci
-```
-
-### 2. Start and initialize the database
-
-```sh
-npm run setup
-```
-
-This starts PostgreSQL in Docker on port `5432`, waits until it is healthy, then
-applies migrations and seeds the demo data. Leave the database running. You do
-not need a separate database-start command when using `setup`.
-
-### 3. Start the API and Web app
-
-```sh
-npm run dev      # API on :3000 and the Vite web app on :5173
-```
-
-`npm run dev` does **not** start PostgreSQL; complete step 2 first.
-
-Open <http://localhost:5173> and sign in with **`demo`** / **`demo-password`**.
-Use the URL printed by Vite if it selects another port, such as `5174`, because
-`5173` is already occupied.
-
-If you previously started the full Docker stack, stop its API and Web services
-before running the local watchers:
-
-```sh
-docker compose stop api web  # leaves PostgreSQL running and preserves data
 npm run setup
 npm run dev
 ```
 
-The API needs port `3000`. Vite always proxies `/api` to `http://localhost:3000`,
-regardless of which port Vite uses. An old Docker API on `3000` can therefore
-receive requests from the new UI and return 404 for routes it does not support.
-`npm run setup` does not stop or rebuild existing API/Web containers.
+`npm run setup` starts **only PostgreSQL**, waits for it to become healthy, and applies committed migrations and repeatable demo seeding. It preserves existing data.
 
-- `npm run setup` starts **only** the Compose `db` service, waits for it to become
-  healthy, then runs the shared migrate-and-seed initializer. It never launches the
-  API/Web or generates migrations, and it preserves existing data.
-- `npm run dev` starts only the API and Web watchers — run `setup` first. Stop with
-  `Ctrl+C`; `docker compose stop db` stops PostgreSQL without deleting its volume.
-- `npm run ingest` (optional) runs the live-ingest job in a separate terminal to
-  evolve the ad data over time.
-- `npm run db:studio` (optional) opens Drizzle Studio at `127.0.0.1:4983`.
+`npm run dev` starts **API and Web only**; it does not start PostgreSQL or MCP.
 
-## Production / full Docker stack
+Open <http://localhost:5173> and sign in:
 
-Builds and runs the entire stack in containers; no host Node or `node_modules`
-needed.
+- **Username:** `demo`
+- **Password:** `demo-password`
+
+If Vite selects another port, use the URL printed in the terminal; its `/api` proxy still targets port `3000`.
+
+### Run MCP (separate terminal)
+
+With the API running:
 
 ```sh
-docker compose up --build    # db → setup → api → web (Nginx on :8080)
+npm run dev -w @gethookd/mcp
 ```
 
-Open <http://localhost:8080> and sign in with `demo` / `demo-password`.
+The Streamable HTTP endpoint is <http://127.0.0.1:3001/mcp>. MCP is **not** included in the root `npm run dev` command or in Docker Compose. See [apps/mcp/README.md](apps/mcp/README.md) for client connection, tool inputs, configuration, and credential forwarding.
 
-Startup is ordered by health: PostgreSQL must be healthy before the one-shot
-`setup` service migrates and seeds; `setup` must succeed before the API starts; and
-the API must be healthy before the Web server starts. All published ports bind to
-loopback only.
+## Docker Demo (API + Web)
+
+To build and run the database, one-shot setup, API, and Web services without installing Node.js on the host:
 
 ```sh
-docker compose down          # stop containers; KEEPS the database volume
-docker compose up --build    # restart; reapplies pending migrations, preserves data
+docker compose up --build
 ```
 
-> These are development/demo images, not a hardened production deployment. Replace
-> the public default secrets and credentials, and complete a security review,
-> before exposing the stack.
+Open <http://localhost:8080> and use the same demo credentials. Startup waits for database health, successful migration/seed, and API health before starting Web. Published ports bind to loopback only.
 
-## Check the portal
-
-After signing in with `demo` / `demo-password`:
-
-- **Overview** shows usage and API-key summaries.
-- **API keys** lets you create scoped keys and permanently revoke them. Copy a
-  newly created secret before closing its modal: it is revealed only once.
-- **Usage** shows the current monthly quota and offers an explicit refresh.
-
-The sidebar changes views without changing the URL; reloading returns to Overview.
-For request details, open browser DevTools → **Network**, filter by `/api`, and
-inspect response status/body. Do not share session tokens or revealed API secrets.
-Local API/Web logs appear in the terminal running `npm run dev`; Docker logs are
-available with `docker compose logs --tail=100 api web`.
-
-### Troubleshooting API 404s
-
-If `/api/portal/usage` or `/api/portal/keys` returns 404, check which API is
-running rather than changing the frontend port:
+MCP is **not** a Compose service in this branch. Run it separately on the host if needed.
 
 ```sh
-docker compose ps
-curl -i http://localhost:3000/api/health
-curl -i http://localhost:3000/api/portal/usage
+docker compose down          # stops services; preserves the database volume
+docker compose up --build    # rebuilds and starts services again
 ```
 
-Without an Authorization header, the current portal usage route returns **401**.
-A **404** means the service reached does not expose that route; a successful
-health check alone does not confirm it is the current API.
+Avoid `docker compose down -v` unless you intend to delete the stored database data.
 
-- **Local development:** stop the current `npm run dev` with `Ctrl+C`, then use
-  `docker compose stop api web`, `npm run setup`, and `npm run dev`. Check startup
-  logs for port conflicts and open the URL printed by Vite.
-- **Full Docker stack:** stop local API/Web watchers first, then run
-  `docker compose up --build` from the current checkout and open
-  <http://localhost:8080>. Existing images are not updated by `npm run dev`.
+> The Docker configuration is for local evaluation, **not a hardened production deployment**. Never expose the public demo credentials or default secrets.
 
-Neither workflow requires deleting the database volume. Avoid
-`docker compose down -v` unless you intend to erase the stored data.
+## Try It
 
-## Common commands
+1. **Developer Portal:** Sign in and inspect Overview, create an API key with `search:read` on the API keys view, copy its secret (shown only once), and inspect Usage. Keys can be permanently revoked.
 
-| Command | What it does |
+2. **API health:** Check the running REST service:
+
+   ```sh
+   curl -i http://localhost:3000/api/health
+   ```
+
+3. **REST search access:** With a newly created `search:read` key stored in the `API_KEY` shell variable, try niche discovery:
+
+   ```sh
+   curl -H "Authorization: Bearer $API_KEY" http://localhost:3000/api/v1/niches
+   ```
+
+4. **MCP:** Connect a Streamable HTTP client to `http://127.0.0.1:3001/mcp` to discover the three tools. Each call must carry a stored API key in `Authorization: Bearer <key>`; the server forwards it unchanged to the REST API, which enforces the key's scope and quota. Integration tests exercise tool behavior against an HTTP fixture.
+
+Keep revealed keys and JWTs private; do not commit them or paste them into issues.
+
+## Development
+
+| Command | Purpose |
 | --- | --- |
-| `npm test` | API unit + PostgreSQL integration tests, then Web component tests |
-| `npm run build` | Type-check and build both workspaces |
-| `npm run lint` / `npm run check` | Biome lint / format+lint checks over `apps/` and `scripts/` |
-| `npm run db:generate` | Generate a new Drizzle migration (review and commit it) |
-| `npm run db:migrate` | Apply committed migrations to the configured database |
-| `npm run db:seed` | Seed the demo user, world fixtures, and public API key |
-| `npm run ingest` | Run the live ad-ingest job |
+| `npm run setup` | Start database, apply migrations, and seed demo data |
+| `npm run dev` | Run API and Web watchers |
+| `npm run dev -w @gethookd/mcp` | Run MCP in watch mode |
+| `npm test` | Run MCP protocol/HTTP tests, API unit and isolated PostgreSQL integration tests, and Web component tests |
+| `npm run build` | Build/type-check all three workspaces |
+| `npm run lint` / `npm run check` | Biome lint / formatting and lint checks |
+| `npm run db:generate` / `npm run db:migrate` | Generate migrations / apply committed migrations |
+| `npm run db:seed` | Seed the demo user, ad fixtures, and public API key |
+| `npm run ingest` | Run the optional live-ingest job |
+| `npm run db:studio` | Open Drizzle Studio (local `127.0.0.1:4983`) |
 
-Integration tests provision a disposable, isolated PostgreSQL instance via
-`compose.test.yaml`; Docker must be running.
+Integration tests provision disposable PostgreSQL through `compose.test.yaml`; Docker must be running.
 
-## Project structure
+### Switching between Docker and local development
 
+If you previously ran the Docker demo, stop its API and Web services before starting local watchers (both use port `3000` for the API):
+
+```sh
+docker compose stop api web
+npm run setup
+npm run dev
 ```
+
+If a portal route unexpectedly returns **404**, check `docker compose ps` and which service owns port `3000`. A healthy old Docker API may not expose the current routes. An unauthenticated `/api/portal/usage` request instead returns **401**, as expected. There is no need to delete the database volume to switch modes.
+
+## Project Structure
+
+```text
 apps/
-  api/            @gethookd/api  — Express REST backend (auth, keys, ads, usage, ingest, DB)
-  web/            @gethookd/web  — React SPA (login + developer portal)
-    src/pages/login/   Login screen
-    src/pages/portal/  Portal views, modals, and portal-specific components
-    src/components/    Shared UI primitives
-    src/state/         Shared application state and backend I/O provider
-    tests/             Web regression and component tests
+  api/               REST API, auth, search, ingestion, billing, database
+  web/               React SPA and developer portal
+  mcp/               Streamable HTTP MCP server, tools, and protocol tests
 scripts/
-  setup.mjs       Local setup: DB readiness + migrate/seed initializer
-docs/             Project documentation (see below)
-compose.yaml      Full local/prod stack (db, setup, api, web)
-compose.test.yaml Isolated, disposable PostgreSQL for integration tests
-AGENTS.md         Contributor & agent conventions (CLAUDE.md is a symlink to it)
-.env.example      Optional configuration overrides (public dev defaults)
+  setup.mjs          Local database setup / migrate / seed
+docs/
+  adr/               Architecture Decision Records
+  agents/            Engineering and agent conventions
+  openapi/           REST API contracts
+  sessions/          Milestone design-session transcripts
+  DESIGN.md          Design overview and trade-offs
+  AI_NOTES.md        Notes on how AI was used in this project
+compose.yaml         Docker demo: db, setup, api, web
+compose.test.yaml    Isolated PostgreSQL for integration tests
+.env.example         Optional root API/Compose configuration
+AGENTS.md            Contributor and agent conventions
 ```
 
 ## Configuration
 
-All configuration is optional for local development. To override defaults, copy
-`.env.example` to `.env` at the repository root. The settings are:
+The API and Compose use development defaults if no root `.env` exists. Copy `.env.example` to `.env` to override them:
 
-- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` — database credentials.
-- `DATABASE_URL` — explicit connection URL; leave unset to derive one from the
-  `POSTGRES_*` values (host commands use `localhost:5432`, containers use `db:5432`).
-- `JWT_SECRET` — signs user session tokens (≥ 32 bytes).
-- `CURSOR_SECRET` — signs search pagination cursors (≥ 32 bytes, independent of
-  `JWT_SECRET`).
+| Variable | Purpose |
+| --- | --- |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | PostgreSQL credentials and database |
+| `DATABASE_URL` | Optional explicit PostgreSQL URL; otherwise derived from `POSTGRES_*` |
+| `JWT_SECRET` | Signs portal JWTs (at least 32 UTF-8 bytes) |
+| `CURSOR_SECRET` | Independently signs opaque pagination cursors (at least 32 UTF-8 bytes) |
 
-The shipped defaults are **public development fixtures only** — never use them in
-production. See `.env.example` for the full notes, including that `POSTGRES_*` only
-provisions a *fresh* database volume.
+MCP reads its configuration from its **process environment**, not automatically from the root `.env`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MCP_HOST` | `127.0.0.1` | MCP bind address |
+| `MCP_PORT` | `3001` | MCP HTTP port |
+| `API_BASE_URL` | `http://127.0.0.1:3000` | REST API origin for MCP calls |
+
+The public defaults are **local development fixtures**. Changing `POSTGRES_*` does not reconfigure an existing PostgreSQL volume. See [`.env.example`](.env.example) for details.
 
 ## Documentation
 
-Project documentation lives under `docs/`:
+- [MCP setup, tool contracts, and limitations](apps/mcp/README.md)
+- [v1 REST OpenAPI contract](docs/openapi/v1.yaml) and [Portal OpenAPI contract](docs/openapi/portal.yaml)
+- [Architecture Decision Records](docs/adr/)
+- [Design overview and trade-offs](docs/DESIGN.md) and [notes on AI use](docs/AI_NOTES.md)
+- [Engineering/agent conventions](docs/agents/) and [AGENTS.md](AGENTS.md)
 
-- **`docs/adr/`** — Architecture Decision Records (ADR-0001 … ADR-0006). The
-  reasoning behind significant design choices (e.g. the v1 cursor design, the API
-  versioning layout, the usage/accounting model).
-- **`docs/agents/`** — engineering and agent conventions:
-  - `issue-tracker.md` — GitHub Issues are the source of truth for specs, plans,
-    and tasks.
-  - `api-file-structure.md` — how API code is organized under `apps/api/src/`.
-- **`docs/openapi/`** — the authoritative machine-checked API contracts:
-  `v1.yaml` (the v1 REST API) and `portal.yaml` (the JWT-only portal management API).
-- **`AGENTS.md`** — top-level contributor/agent conventions (issue tracking, API
-  file structure, where documentation and ADRs live).
+Milestone specifications, plans, and progress are tracked in **GitHub Issues** as the source of truth.
 
-Specifications, plans, and progress are tracked in **GitHub Issues**, not in-repo
-files. The previous, much longer README — which documented the full endpoint
-reference and per-milestone verification notes — is archived verbatim at
-`docs/archive/README-legacy.md` pending triage into ADRs, OpenAPI, and issues.
+## Known Limitations
+
+- **M5 — evaluation pending:** Caller Bearer-key forwarding is implemented and REST enforces all shared controls; the remaining M5 item is real-model evaluation evidence (`MCP_EVAL.md`). Oversized MCP result-size limiting, portal first-call detection, Playwright/browser E2E, and automated evaluation replay are deferred by decision — see [apps/mcp/README.md](apps/mcp/README.md).
+- **Local demo only:** Default credentials, secrets, and Docker configuration are not production-ready.

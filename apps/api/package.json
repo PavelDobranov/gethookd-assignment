@@ -17,6 +17,7 @@
     "db:studio": "drizzle-kit studio --config=drizzle.config.ts --host=127.0.0.1"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",

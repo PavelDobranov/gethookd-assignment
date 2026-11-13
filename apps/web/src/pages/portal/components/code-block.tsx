@@ -8,19 +8,41 @@ export interface CodeBlockProps {
   children?: ReactNode;
 }
 
+type CopyStatus = "idle" | "copied" | "failed";
+
+const STATUS_NOTE: Record<CopyStatus, string> = {
+  idle: "",
+  copied: "Copied to clipboard.",
+  failed: "Copy unavailable. Select the text and copy it manually.",
+};
+
 export function CodeBlock({ code, title, children }: CodeBlockProps) {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const [copied, setCopied] = useState(false);
+  const preRef = useRef<HTMLPreElement>(null);
+  const [status, setStatus] = useState<CopyStatus>("idle");
+  const copied = status === "copied";
+
+  // Fallback when the clipboard is blocked/unavailable: select the rendered
+  // code so the reader can copy it manually with the keyboard.
+  function selectCode() {
+    const pre = preRef.current;
+    const selection = window.getSelection();
+    if (!pre || !selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(code);
-      setCopied(true);
+      setStatus("copied");
       clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCopied(false), 2000);
+      timer.current = setTimeout(() => setStatus("idle"), 2000);
     } catch {
-      // Clipboard unavailable; the code remains selectable in the <pre>.
-      setCopied(false);
+      setStatus("failed");
+      selectCode();
     }
   }
 
@@ -67,7 +89,10 @@ export function CodeBlock({ code, title, children }: CodeBlockProps) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre>{children ?? code}</pre>
+      <pre ref={preRef}>{children ?? code}</pre>
+      <span aria-live="polite" className="stat-note" data-status={status}>
+        {STATUS_NOTE[status]}
+      </span>
     </div>
   );
 }

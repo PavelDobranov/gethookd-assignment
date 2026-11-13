@@ -90,7 +90,6 @@ or transport.
 - **Demo JWT.** Portal authentication reuses the existing demo login JWT. It is a
   development fixture, not production-ready authentication, and these JWT routes
   never enter the API-key allowance or return 429.
-- **No v1 429.** Only v0 surfaces the shared 429 (ADR-0001); v1 has no 429 response.
 
 ## Handoff to M5 (MCP and evaluation)
 
@@ -100,8 +99,35 @@ M5 consumes these controls rather than reimplementing them, and must:
   backing, and prove REST/MCP parity for admission, billing and error shapes.
 - Either propagate a caller-supplied `Idempotency-Key` through MCP tools or
   explicitly document that MCP calls are no-header (each success charges).
-- Add Playwright coverage (deferred out of M4) and implement/evaluate the MCP and
-  connect setup with the required real-model/client transcripts.
+- Implement and evaluate the MCP server and the portal connect setup with the
+  required real-model/client transcripts recorded in `docs/MCP_EVAL.md`.
+
+### Corrections and deferrals recorded in M5
+
+Per the approved M5 specification (#118), M5 documentation corrects and records the
+following. None of it authorizes any change to REST policy.
+
+- **Stale "no v1 429" statement corrected.** An earlier revision of this ADR listed
+  "no v1 429" as a limitation, claiming only v0 surfaced the shared 429. That was
+  stale: the implemented v1 Bearer admission middleware
+  (`apps/api/src/api-keys/middleware.ts`) sends the shared `RATE_LIMITED` 429 helper
+  when the per-key allowance is exhausted, so **both v0 and v1 surface the shared
+  429**. ADR-0001 remains the record of v0's narrower exception to its legacy
+  HTTP 400 rule, not a claim that 429 is v0-only.
+- **Browser E2E / Playwright deferred.** The M4-era handoff to add Playwright coverage
+  is superseded by the explicit M5 interview decision to defer Playwright/browser E2E
+  entirely for this assessment; existing automated tests plus manual real-browser
+  verification stand in its place.
+- **First-call detection deferred.** The connect-panel first-call indicator/check is
+  deferred; the panel SHOULD is not claimed complete.
+- **Automated evaluation replay deferred.** Real-model evaluation is run manually and
+  recorded in `docs/MCP_EVAL.md`; automated replay is out of scope and not part of
+  ordinary `npm test`.
+- **Enforced size budget remains unmet.** There is no enforced byte/token/per-result
+  size budget in M5 scope. Compact search fields and the 100-result maximum are not a
+  hard per-result bound, so large headlines/details can still consume substantial
+  model context. This is recorded as an unmet MUST by explicit user decision, not as
+  compliance; truncation and advanced oversized-response handling are deferred.
 
 ## Alternatives considered
 
