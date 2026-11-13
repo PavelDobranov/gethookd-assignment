@@ -83,6 +83,22 @@ npm run dev      # API on :3000 and the Vite web app on :5173
 ```
 
 Open <http://localhost:5173> and sign in with **`demo`** / **`demo-password`**.
+Use the URL printed by Vite if it selects another port, such as `5174`, because
+`5173` is already occupied.
+
+If you previously started the full Docker stack, stop its API and Web services
+before running the local watchers:
+
+```sh
+docker compose stop api web  # leaves PostgreSQL running and preserves data
+npm run setup
+npm run dev
+```
+
+The API needs port `3000`. Vite always proxies `/api` to `http://localhost:3000`,
+regardless of which port Vite uses. An old Docker API on `3000` can therefore
+receive requests from the new UI and return 404 for routes it does not support.
+`npm run setup` does not stop or rebuild existing API/Web containers.
 
 - `npm run setup` starts **only** the Compose `db` service, waits for it to become
   healthy, then runs the shared migrate-and-seed initializer. It never launches the
@@ -118,6 +134,46 @@ docker compose up --build    # restart; reapplies pending migrations, preserves 
 > the public default secrets and credentials, and complete a security review,
 > before exposing the stack.
 
+## Check the portal
+
+After signing in with `demo` / `demo-password`:
+
+- **Overview** shows usage and API-key summaries.
+- **API keys** lets you create scoped keys and permanently revoke them. Copy a
+  newly created secret before closing its modal: it is revealed only once.
+- **Usage** shows the current monthly quota and offers an explicit refresh.
+
+The sidebar changes views without changing the URL; reloading returns to Overview.
+For request details, open browser DevTools → **Network**, filter by `/api`, and
+inspect response status/body. Do not share session tokens or revealed API secrets.
+Local API/Web logs appear in the terminal running `npm run dev`; Docker logs are
+available with `docker compose logs --tail=100 api web`.
+
+### Troubleshooting API 404s
+
+If `/api/portal/usage` or `/api/portal/keys` returns 404, check which API is
+running rather than changing the frontend port:
+
+```sh
+docker compose ps
+curl -i http://localhost:3000/api/health
+curl -i http://localhost:3000/api/portal/usage
+```
+
+Without an Authorization header, the current portal usage route returns **401**.
+A **404** means the service reached does not expose that route; a successful
+health check alone does not confirm it is the current API.
+
+- **Local development:** stop the current `npm run dev` with `Ctrl+C`, then use
+  `docker compose stop api web`, `npm run setup`, and `npm run dev`. Check startup
+  logs for port conflicts and open the URL printed by Vite.
+- **Full Docker stack:** stop local API/Web watchers first, then run
+  `docker compose up --build` from the current checkout and open
+  <http://localhost:8080>. Existing images are not updated by `npm run dev`.
+
+Neither workflow requires deleting the database volume. Avoid
+`docker compose down -v` unless you intend to erase the stored data.
+
 ## Common commands
 
 | Command | What it does |
@@ -139,6 +195,11 @@ Integration tests provision a disposable, isolated PostgreSQL instance via
 apps/
   api/            @gethookd/api  — Express REST backend (auth, keys, ads, usage, ingest, DB)
   web/            @gethookd/web  — React SPA (login + developer portal)
+    src/pages/login/   Login screen
+    src/pages/portal/  Portal views, modals, and portal-specific components
+    src/components/    Shared UI primitives
+    src/state/         Shared application state and backend I/O provider
+    tests/             Web regression and component tests
 scripts/
   setup.mjs       Local setup: DB readiness + migrate/seed initializer
 docs/             Project documentation (see below)
