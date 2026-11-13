@@ -75,12 +75,32 @@ The repository is an npm-workspaces monorepo with two applications — a backend
 
 ## Local development
 
+Start Docker Engine / Docker Desktop first, then follow these steps in order.
+
+### 1. Install dependencies
+
 ```sh
 nvm use          # Node 26.13.0
 npm ci
-npm run setup    # starts PostgreSQL (Docker), applies migrations, seeds the world
+```
+
+### 2. Start and initialize the database
+
+```sh
+npm run setup
+```
+
+This starts PostgreSQL in Docker on port `5432`, waits until it is healthy, then
+applies migrations and seeds the demo data. Leave the database running. You do
+not need a separate database-start command when using `setup`.
+
+### 3. Start the API and Web app
+
+```sh
 npm run dev      # API on :3000 and the Vite web app on :5173
 ```
+
+`npm run dev` does **not** start PostgreSQL; complete step 2 first.
 
 Open <http://localhost:5173> and sign in with **`demo`** / **`demo-password`**.
 Use the URL printed by Vite if it selects another port, such as `5174`, because
