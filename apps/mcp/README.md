@@ -117,6 +117,13 @@ a fresh search without a cursor to clear filters.
   and web tests. No suite is optional.
 - Integration tests drive the real MCP protocol with the official client and
   a controlled HTTP API fixture; discovery does not make API requests.
+- An API-side suite (`@gethookd/api` `tests/mcp-auth.integration.test.ts`, in the
+  isolated-PostgreSQL gate) runs a real MCP client against a real MCP server
+  forwarding to the real REST API: a `search:read` key exercises every tool, a
+  `keys:manage`-only key fails with `INSUFFICIENT_SCOPE`, a valid portal session
+  JWT substituted for an API key and absent/malformed/unknown credentials are
+  classified as `UNAUTHENTICATED`, and revoking a key through the REST key API
+  blocks the next MCP call. Fixtures live in the API tests, not MCP code.
 
 **Authentication:** each caller sends `Authorization: Bearer <API key>` on the MCP
 request. The server reads Node's raw headers before SDK normalization and accepts
