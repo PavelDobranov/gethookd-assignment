@@ -2,6 +2,7 @@ import { type RequestHandler, Router } from "express";
 
 import type { KeyHandler, KeyResponse } from "../../api-keys/index.js";
 import type { createDatabase } from "../../db/client.js";
+import { prepareBilling, sendBillableResult } from "../../usage/index.js";
 import { niches } from "../model.js";
 import { CursorError, type CursorState, createCursorCodec } from "./cursor.js";
 import { sendError } from "./errors.js";
@@ -60,12 +61,15 @@ function createGetAdHandler(db: ReturnType<typeof createDatabase>["db"]): KeyHan
       ]);
       return;
     }
+    const billing = await prepareBilling(db, req, res, { operation: "v1.detail", id: req.params.id });
+    if (!billing) return;
     const ad = await getAd(db, req.params.id);
     if (!ad) {
       sendError(res, "AD_NOT_FOUND");
       return;
     }
-    res.json({ data: ad });
+    const body = JSON.stringify({ data: ad });
+    await sendBillableResult(db, res, body, billing.binding);
   };
 }
 
@@ -102,6 +106,11 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
       return;
     }
     const { query, limit } = normalized.value;
+    const billing = await prepareBilling(db, req, res, {
+      operation: "v1.search",
+      parameters: { query, limit, cursor: validated.value.cursor },
+    });
+    if (!billing) return;
     const page = original
       ? { snapshot: original.snapshot, data: await queryAds(db, query, limit, original) }
       : await readFirstPage(db, (tx) => queryAds(tx, query, limit));
@@ -122,7 +131,7 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
                 : { rank: last.impressionRank, id: last.id },
           })
         : null;
-    res.json({
+    const body = JSON.stringify({
       data: rows.map((row) => mapAdSummary(row, now)),
       applied_filters: {
         q: query.q,
@@ -137,6 +146,7 @@ function createSearchHandler(db: ReturnType<typeof createDatabase>["db"], cursor
       next_cursor: nextCursor,
       cursor_expires_at: new Date(expiresAt).toISOString(),
     });
+    await sendBillableResult(db, res, body, billing.binding);
   };
 }
 

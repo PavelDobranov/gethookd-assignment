@@ -671,8 +671,8 @@ routers precede one root fallback/error boundary, leaving management paths
 available for composition. Portal JWT authentication is unchanged; v0 integration
 remains a separate M4 slice.
 
-`src/usage/billing.ts` provides internal settlement and owner usage operations;
-HTTP enforcement is not connected yet. Callers must authenticate first, supply
+`src/usage/billing.ts` provides settlement and owner usage operations.
+V1 ad search/detail enforce billing via `src/usage/http.ts`; callers authenticate first, supply
 only hashed binding identities and fully prepare/serialize a successful result
 before settlement. A live matching binding is free without extending expiry;
 a different fingerprint conflicts before quota. Missing/expired bindings and
@@ -692,10 +692,14 @@ meter. Owner serialization is a deliberate throughput limit of this simple desig
 A committed settlement survives lost delivery or a new process/pool. Never retry
 an ambiguous commit automatically: a later same-header request resolves the
 retained binding; without a header, another successful call is another charge.
-Do not send a billable success until settlement has committed. HTTP delivery
-and shared-control integration remain separate M4 slices.
+V1 validates input/cursors and checks known conflicting bindings before reading.
+It prepares mapping, cursor encoding and the complete JSON string before final
+settlement rechecks binding/quota atomically. Only after commit does it send 200.
+Niches and unsuccessful reads are free. No accounting lock spans the M3 snapshot
+read or transport write; matching retries execute fresh reads rather than replaying
+a cached response.
 
-`src/usage/identity.ts` provides pure billing identities for later HTTP adapters.
+`src/usage/identity.ts` provides pure billing identities for HTTP adapters.
 Billable operations may accept one case-insensitive `Idempotency-Key` header
 name with a case-sensitive opaque value: 1–128 ASCII letters, digits, `.`, `_`,
 `:`, or `-`, allowing only transport spaces/tabs around it. Parse raw header
@@ -710,8 +714,9 @@ supplied continuation cursor, if any; detail uses the exact once-decoded opaque
 ID. Equivalent defaults, ordering and inherited/partially repeated continuation
 filters agree. Meaningful text case/internal whitespace, versions, operations,
 cursors and page sizes remain distinct. Raw URLs, credentials, newly generated
-response cursors and live results never enter fingerprints. These helpers do not
-yet enable the header, charging or rate enforcement on REST routes.
+response cursors and live results never enter fingerprints. V1 billable reads
+accept this optional header; free endpoints ignore it. V0 control integration
+remains pending.
 
 ### Repeat-safe world and demo seeding
 

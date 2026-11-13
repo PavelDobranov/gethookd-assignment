@@ -54,6 +54,19 @@ export function readUsage(db: Database, ownerId: string, clock: AccountingClock 
   });
 }
 
+/** Advisory conflict check only; final settlement must recheck under the owner lock. */
+export async function checkBillingBinding(db: Database, identity: BillingIdentity, binding?: BillingBinding) {
+  if (!binding) return;
+  const { rows } = await db.execute<{ fingerprint_hash: string }>(sql`
+    SELECT fingerprint_hash FROM billing_bindings
+    WHERE api_key_id = ${identity.id}::uuid AND value_hash = ${binding.valueHash}
+      AND expires_at > clock_timestamp()
+  `);
+  if (rows[0] && rows[0].fingerprint_hash !== binding.fingerprintHash) {
+    throw new BillingError("IDEMPOTENCY_CONFLICT");
+  }
+}
+
 /** Settle only a fully prepared successful result, before sending it. Never automatically retry. */
 export function settleBilling(
   db: Database,
