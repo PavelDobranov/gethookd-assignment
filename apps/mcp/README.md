@@ -136,7 +136,15 @@ a fresh search without a cursor to clear filters.
   `IDEMPOTENCY_CONFLICT` on either channel, and different keys keep independent
   namespaces. A deduplicated retry returns current data for free, and MCP calls
   without a supplied key generate no implicit identity (no second meter, no
-  JSON-RPC/session dedup).
+  JSON-RPC/session dedup). The same suite proves the remaining shared controls:
+  mixed v0 (query-credential), v1 (Bearer) and MCP traffic consumes one shared
+  per-key allowance, appending exactly one admission per valid call on any channel;
+  free `list_niches` calls and admitted-then-failed reads consume allowance while
+  protocol-only connect/discovery exchanges do not; and an exhausted allowance
+  propagates REST's live `RATE_LIMITED` wait through MCP unchanged. An exhausted
+  owner quota refuses a new billable MCP success with `QUOTA_EXCEEDED` and reset
+  guidance, while an existing matching billed retry still deduplicates for free and
+  free or failing reads pass their own checks rather than the quota check.
 
 **Authentication:** each caller sends `Authorization: Bearer <API key>` on the MCP
 request. The server reads Node's raw headers before SDK normalization and accepts
