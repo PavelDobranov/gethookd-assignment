@@ -49,6 +49,7 @@ it("resolves the actual owning user from a hash-only stored key", async () => {
     createdAt: expect.any(Date),
     lastUsedAt: null,
     revokedAt: null,
+    rateAdmissions: [],
   });
 });
 

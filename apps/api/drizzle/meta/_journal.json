@@ -36,6 +36,13 @@
       "when": 1794563779373,
       "tag": "0004_nifty_whizzer",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794564529051,
+      "tag": "0005_known_mariko_yashida",
+      "breakpoints": true
     }
   ]
 }

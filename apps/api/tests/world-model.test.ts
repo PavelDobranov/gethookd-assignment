@@ -34,6 +34,12 @@ afterAll(close);
 beforeEach(async () => {
   // Only this suite's database in the disposable test project is touched.
   await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
+  expect(
+    (
+      await db.execute(sql`SELECT (SELECT count(*)::int FROM monthly_usage) AS usage,
+    (SELECT count(*)::int FROM billing_bindings) AS bindings`)
+    ).rows,
+  ).toEqual([{ usage: 0, bindings: 0 }]);
   await db.execute(sql`INSERT INTO brands (id, name) VALUES (1, 'First'), (2, 'Second')`);
   await db.insert(users).values({ id: ownerId, username: "owner", passwordHash: "test-hash" });
 });
@@ -120,6 +126,7 @@ it("has only the intended storage columns and PostgreSQL identity/date/array typ
       ["created_at", "timestamptz"],
       ["last_used_at", "timestamptz"],
       ["revoked_at", "timestamptz"],
+      ["rate_admissions", "_timestamptz"],
     ].map(([column_name, udt_name]) => ({
       table_name: "api_keys",
       column_name,
@@ -151,11 +158,21 @@ it("round-trips domain fixtures through Drizzle and preserves all world records 
       createdAt: expect.any(Date),
       lastUsedAt: null,
       revokedAt: null,
+      rateAdmissions: [],
     },
   ]);
+  await db.execute(sql`INSERT INTO monthly_usage VALUES (${ownerId}, '2028-02-01', 12)`);
+  await db.execute(sql`INSERT INTO billing_bindings VALUES
+    (${keysBefore[0].id}, 'value-hash', 'fingerprint-hash', '2028-02-29T12:00:00.123456Z', '2028-03-01T12:00:00.123456Z')`);
+  const accounting = () =>
+    db.execute(sql`SELECT
+    (SELECT json_agg(monthly_usage)::text FROM monthly_usage) AS usage,
+    (SELECT json_agg(billing_bindings)::text FROM billing_bindings) AS bindings`);
+  const accountingBefore = (await accounting()).rows;
   const brandsBefore = await db.select().from(brands).orderBy(brands.id);
   const usersBefore = await db.select().from(users);
   await migrate(db, { migrationsFolder: "drizzle" });
+  expect((await accounting()).rows).toEqual(accountingBefore);
   expect(await db.select().from(ads)).toEqual([stored]);
   expect(await db.select().from(apiKeys)).toEqual(keysBefore);
   expect(await db.select().from(brands).orderBy(brands.id)).toEqual(brandsBefore);
@@ -399,6 +416,7 @@ it("rejects unknown M3 legacy hashes atomically, then truthfully backfills the k
       createdAt: expect.any(Date),
       lastUsedAt: null,
       revokedAt: null,
+      rateAdmissions: [],
     });
     expect(key.createdAt.getTime()).toBeGreaterThanOrEqual(new Date(String(lower.time)).getTime());
     expect(key.createdAt.getTime()).toBeLessThanOrEqual(new Date(String(upper.time)).getTime());
@@ -480,6 +498,7 @@ it("upgrades M1 and a populated M2 database without changing original records or
         createdAt: expect.any(Date),
         lastUsedAt: null,
         revokedAt: null,
+        rateAdmissions: [],
       },
     ]);
     const markers = await connection.db.select({ xid: ads.insertedXid }).from(ads);

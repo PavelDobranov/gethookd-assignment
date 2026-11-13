@@ -41,6 +41,8 @@ async function readRecords() {
     UNION ALL SELECT 'brands', id::text, row_to_json(b)::text FROM brands b
     UNION ALL SELECT 'users', id::text, row_to_json(u)::text FROM users u
     UNION ALL SELECT 'api_keys', id::text, row_to_json(k)::text FROM api_keys k
+    UNION ALL SELECT 'monthly_usage', owner_id::text || '/' || period_start::text, row_to_json(m)::text FROM monthly_usage m
+    UNION ALL SELECT 'billing_bindings', api_key_id::text || '/' || value_hash, row_to_json(b)::text FROM billing_bindings b
     ORDER BY 1, 2
   `);
   return rows;
@@ -60,6 +62,12 @@ beforeAll(async () => {
 beforeEach(async () => {
   for (const { db } of connections) {
     await db.execute(sql`TRUNCATE api_keys, ads, brands, users CASCADE`);
+    expect(
+      (
+        await db.execute(sql`SELECT (SELECT count(*)::int FROM monthly_usage) AS usage,
+      (SELECT count(*)::int FROM billing_bindings) AS bindings`)
+      ).rows,
+    ).toEqual([{ usage: 0, bindings: 0 }]);
   }
 });
 afterAll(async () => {
@@ -186,6 +194,7 @@ it("preserves all evolved records through initialization and seed while restorin
     createdAt: expect.any(Date),
     lastUsedAt: null,
     revokedAt: null,
+    rateAdmissions: [],
   });
   await db.update(brands).set({ name: "Evolved brand" }).where(eq(brands.id, 2));
   await db
@@ -216,6 +225,9 @@ it("preserves all evolved records through initialization and seed while restorin
   await db.insert(ads).values({ ...nullRanked, id: "unrelated-ad", brandId: 999 });
   await db.execute(sql`UPDATE ads SET discovered_at = '2026-10-06T12:00:00.123456Z'
     WHERE id = 'ingest-ad-occupied-highest-rank'`);
+  await db.execute(sql`INSERT INTO monthly_usage VALUES (${unrelated.id}, '2028-02-01', 12)`);
+  await db.execute(sql`INSERT INTO billing_bindings VALUES
+    (${unrelatedKey.id}, 'value-hash', 'fingerprint-hash', '2028-02-29T12:00:00.123456Z', '2028-03-01T12:00:00.123456Z')`);
   const before = await readRecords();
   const initialize = await run("npm", ["run", "db:initialize"], {
     env: { ...process.env, DATABASE_URL: first.url },

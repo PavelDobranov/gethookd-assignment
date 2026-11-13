@@ -235,15 +235,21 @@ it("finalizes staged metadata without changing recorded values, including micros
     }
     await migrate(upgrade.db, { migrationsFolder: directory });
     await upgrade.db.insert(users).values({ id: ownerId, username: "staged-owner", passwordHash: "test-hash" });
-    await upgrade.db.insert(apiKeys).values(apiKeyFixture(ownerId, "preserved-hash"));
+    // This staged schema predates rate_admissions; do not use the current insert shape.
+    await upgrade.db.execute(sql`INSERT INTO api_keys (user_id, key_hash, prefix, scopes)
+      VALUES (${ownerId}, 'preserved-hash', 'test-fixture', ARRAY['search:read', 'keys:manage'])`);
     await upgrade.db.execute(sql`UPDATE api_keys SET scopes = ARRAY['keys:manage'],
       created_at = '2026-10-05T12:00:00.123456Z', last_used_at = '2026-10-06T12:00:00.234567Z',
       revoked_at = '2026-10-07T12:00:00.345678Z'`);
     const snapshot = async () =>
-      (await upgrade.db.execute(sql`SELECT row_to_json(api_keys)::text AS row FROM api_keys ORDER BY id`)).rows;
+      (
+        await upgrade.db.execute(sql`SELECT (to_jsonb(api_keys) - 'rate_admissions')::text AS row
+        FROM api_keys ORDER BY id`)
+      ).rows;
     const before = await snapshot();
     await migrate(upgrade.db, { migrationsFolder: "drizzle" });
     expect(await snapshot()).toEqual(before);
+    expect((await upgrade.db.select().from(apiKeys))[0].rateAdmissions).toEqual([]);
     await migrate(upgrade.db, { migrationsFolder: "drizzle" });
     expect(await snapshot()).toEqual(before);
   } finally {

@@ -593,6 +593,26 @@ key ID, owner and scopes without caching authorization. The existing
 the next lookup. Last-used updates and HTTP scope/admission enforcement belong
 to the shared control boundary, not these standalone lookup operations.
 
+### Durable accounting primitives
+
+`0005_known_mariko_yashida.sql` adds a default-empty `rate_admissions`
+`timestamptz[]` (at most 60 entries), `monthly_usage` keyed by owner/UTC month
+with a 0–1,000 count, and `billing_bindings` keyed by API-key ID and hashed
+idempotency value. Bindings contain only fingerprint hashes and settlement/expiry
+instants, not headers, query bodies or response snapshots. Repeat setup preserves
+accounting rows as well as key metadata; disposable-test CASCADE resets include
+these dependent tables.
+
+`src/usage/transactions.ts` bounds short read-committed control transactions with
+local 500ms lock and 1500ms transaction deadlines, retaining the existing 2s
+pool/query/statement limits. Admission's key-row lock must commit before billing.
+Settlement locks the owner `FOR NO KEY UPDATE` (compatible with key-creation FK
+checks), then samples `clock_timestamp()` after any wait. It never locks a key
+while holding the owner lock. Timestamp strings/SQL retain microseconds; a JS
+`Date` roundtrip must not decide admission or binding cutoffs. No transaction
+holds these locks across ad reads or network delivery. Timeout failures roll back;
+PostgreSQL transaction-timeout session termination requires pool reconnection.
+
 ### Repeat-safe world and demo seeding
 
 After migrations, run `npm run db:seed -w @gethookd/api`. Public local credentials

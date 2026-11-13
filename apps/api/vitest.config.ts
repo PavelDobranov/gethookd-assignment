@@ -8,6 +8,7 @@ export default defineConfig({
           name: "unit",
           include: ["tests/**/*.test.ts"],
           exclude: [
+            "tests/accounting-locks.test.ts",
             "tests/key-lifecycle.test.ts",
             "tests/v1-openapi.test.ts",
             "tests/v1-search.test.ts",
@@ -34,6 +35,7 @@ export default defineConfig({
           // Real scrypt/seed suites share the test server; keep deadlines isolated.
           fileParallelism: false,
           include: [
+            "tests/accounting-locks.test.ts",
             "tests/key-lifecycle.test.ts",
             "tests/v1-openapi.test.ts",
             "tests/v1-search.test.ts",
